@@ -1,0 +1,19 @@
+name: Revup CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    name: Run lint checks
+    steps:
+    - uses: actions/checkout@v3
+      name: Checkout the repo
+    - run: make deps
+      name: Install dependencies
+    - run: make lint
+      name: Verify code linting
