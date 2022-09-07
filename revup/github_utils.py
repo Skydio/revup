@@ -49,7 +49,7 @@ class PrComment:
 
 
 @dataclass
-class PrInfo:  # pylint: disable=too-many-instance-attributes
+class PrInfo:
     """
     Represents a Github pull request.
     """
@@ -134,9 +134,7 @@ async def query_everything(
     head_refs: List[str],
     user_ids: List[str],
     labels: List[str],
-) -> Tuple[
-    str, List[Optional[PrInfo]], Dict[str, str], Dict[str, str], Dict[str, str]
-]:  # pylint: disable=too-many-statements, too-many-locals
+) -> Tuple[str, List[Optional[PrInfo]], Dict[str, str], Dict[str, str], Dict[str, str]]:
     """
     This function does all necessary graphql querying in one request. This dramatically reduces the
     amount of time spent on querying.
@@ -441,9 +439,7 @@ async def create_pull_requests(
             pr.url = result["url"]
 
 
-async def update_pull_requests(  # pylint: disable=too-many-locals,too-many-statements
-    github_ep: github.GitHubEndpoint, prs: List[PrUpdate]
-) -> None:
+async def update_pull_requests(github_ep: github.GitHubEndpoint, prs: List[PrUpdate]) -> None:
     """
     Update the given pull request contents, and also add reviewers and labels.
     """

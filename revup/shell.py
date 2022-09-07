@@ -218,7 +218,7 @@ class Shell:
             logging.debug("Took {}s".format(time.time() - start_time))
         return ret
 
-    async def piped_sh(  # pylint: disable=too-many-locals
+    async def piped_sh(
         self,
         args1: List[str],
         args2: List[str],
