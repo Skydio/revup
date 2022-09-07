@@ -43,6 +43,12 @@ need changed if the user is using github enterprise.
 : The name of the remote that corresponds to github. Branches on this
 remote are also used for base branch detection. Defaults to "origin".
 
+**--fork-name**
+: If specified, the name of the remote that corresponds to a github fork
+that should be used to push branches to. The pull request will be created
+using the branch from this fork. If empty, remote-name is used for both
+pushing and creating the pull request.
+
 **--editor**
 : The user's preferred editor, used for various message and file
 editing. If not set, value is taken first from "git config core.editor"
