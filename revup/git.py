@@ -49,6 +49,8 @@ GIT_DIFF_ARGS = [
     "-U1",
 ]
 
+COMMON_MAIN_BRANCHES = ["main", "master"]  # Below logic assumes 2 values here
+
 
 @dataclass
 class CommitHeader:
@@ -164,12 +166,13 @@ async def make_git(
             ret = os.environ.get("GIT_EDITOR", os.environ.get("EDITOR", "nano"))
         return ret
 
-    repo_root, git_dir, actual_version, email, editor = await asyncio.gather(
+    repo_root, git_dir, actual_version, email, editor, main_exists = await asyncio.gather(
         git_ctx.git_stdout("rev-parse", "--show-toplevel"),
         git_ctx.git_stdout("rev-parse", "--path-format=absolute", "--git-dir"),
         git_ctx.git_stdout("--version"),
         get_email(),
         get_editor(),
+        git_ctx.commit_exists(main_branch),
     )
 
     if git_version:
@@ -189,6 +192,13 @@ async def make_git(
     git_ctx.email = email.lower()
     git_ctx.author = git_ctx.email.split("@")[0]
     git_ctx.editor = editor
+    if not main_exists:
+        if main_branch in COMMON_MAIN_BRANCHES:
+            git_ctx.main_branch = COMMON_MAIN_BRANCHES[1 - COMMON_MAIN_BRANCHES.index(main_branch)]
+            logging.info(
+                'Branch {} not found, falling back to "{}". We recommend you set this in'
+                " .revupconfig".format(main_branch, git_ctx.main_branch)
+            )
     return git_ctx
 
 
