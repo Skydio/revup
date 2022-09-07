@@ -14,6 +14,7 @@ async def main(
     git_ctx: git.Git,
     github_ep: Optional[github.GitHubEndpoint] = None,
     repo_info: Optional[github_utils.GitHubRepoInfo] = None,
+    fork_info: Optional[github_utils.GitHubRepoInfo] = None,
 ) -> int:
     """
     Handles the "upload" command.
@@ -24,6 +25,7 @@ async def main(
         args.relative_branch,
         github_ep,
         repo_info,
+        fork_info,
     )
     with get_console().status("Finding topics…"):
         await topics.populate_topics(

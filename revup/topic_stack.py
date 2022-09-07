@@ -192,6 +192,7 @@ class TopicStack:
     # Github access info
     github_ep: Optional[github.GitHubEndpoint] = None
     repo_info: Optional[github_utils.GitHubRepoInfo] = None
+    fork_info: Optional[github_utils.GitHubRepoInfo] = None
 
     # Original list of relevant commits given to the submitter
     commits: List[git.CommitHeader] = field(default_factory=list)
@@ -267,9 +268,10 @@ class TopicStack:
         self, review: Review, orig: Optional[PrComment]
     ) -> Optional[PrComment]:
         if (
-            review.push_status != PushStatus.PUSHED
+            review.push_status != PushStatus.PUSHED  # pylint: disable=too-many-boolean-expressions
             or review.status == PrStatus.MERGED
             or not self.repo_info
+            or not self.fork_info
             or review.pr_info is None
             or review.base_ref is None
         ):
@@ -311,7 +313,7 @@ class TopicStack:
                 # Non rebase push, diff against previous version of the branch
                 diff_base = review.pr_info.headRefOid
             diff = (
-                f"[diff](/{self.repo_info.owner}/{self.repo_info.name}/compare/"
+                f"[diff](/{self.fork_info.owner}/{self.repo_info.name}/compare/"
                 f"{diff_base}..{review.new_commits[-1]})"
             )
             summary = await self.git_ctx.get_diff_summary(diff_base, review.new_commits[-1])
@@ -324,9 +326,9 @@ class TopicStack:
 
         ret += (
             f"\r\n| {number} | [{review.new_commits[-1][:8]}]"
-            f"(/{self.repo_info.owner}/{self.repo_info.name}/commit/{review.new_commits[-1]}) "
+            f"(/{self.fork_info.owner}/{self.repo_info.name}/commit/{review.new_commits[-1]}) "
             f"| [{review.base_ref[:8]}]"
-            f"(/{self.repo_info.owner}/{self.repo_info.name}/commit/{review.base_ref}) "
+            f"(/{self.fork_info.owner}/{self.repo_info.name}/commit/{review.base_ref}) "
             f"| {diff} | {datetime.today().strftime('%b %d %-I:%M %p')} | {summary} |"
         )
         return PrComment(ret, orig.id if orig else None)
@@ -1135,7 +1137,7 @@ class TopicStack:
         """
         Actually perform the github graphql PR creation
         """
-        if not self.github_ep or not self.repo_info or not self.repo_id:
+        if not self.github_ep or not self.repo_info or not self.fork_info or not self.repo_id:
             raise RuntimeError("Can't update without github info")
 
         prs_to_create = []
@@ -1146,13 +1148,15 @@ class TopicStack:
         if prs_to_create:
             # Create all prs in one request. These will most likely end up being modified
             # later since its not possible to add labels or reviewers at creation time.
-            await github_utils.create_pull_requests(self.github_ep, self.repo_id, prs_to_create)
+            await github_utils.create_pull_requests(
+                self.github_ep, self.repo_id, self.repo_info, self.fork_info, prs_to_create
+            )
 
     async def update_prs(self) -> None:
         """
         Actually perform the github graphql PR updates
         """
-        if not self.github_ep or not self.repo_info or not self.repo_id:
+        if not self.github_ep or not self.repo_info or not self.fork_info or not self.repo_id:
             raise RuntimeError("Can't update without github info")
 
         prs_to_update = []
