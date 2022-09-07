@@ -92,6 +92,7 @@ def make_toplevel_parser() -> RevupArgParser:
     revup_parser.add_argument("--github-username")
     revup_parser.add_argument("--github-url", default="github.com")
     revup_parser.add_argument("--remote-name", default="origin")
+    revup_parser.add_argument("--fork-name", default="")
     revup_parser.add_argument("--editor")
     revup_parser.add_argument("--verbose", "-v", action="store_true")
     revup_parser.add_argument("--keep-temp", "-k", action="store_true")
@@ -135,7 +136,7 @@ async def get_git(args: argparse.Namespace) -> git.Git:
         sh,
         args.git_path,
         args.git_version,
-        args.remote_name,
+        args.fork_name if args.fork_name else args.remote_name,
         args.main_branch,
         args.base_branch_globs,
         args.keep_temp,
@@ -171,11 +172,32 @@ async def github_connection(
             f"or change the configured remote in {conf.config_path}\n"
         )
 
+    fork_info = repo_info
+    if args.fork_name and args.fork_name != args.remote_name:
+        fork_info = await github_utils.get_github_repo_info(
+            git_ctx=git_ctx, github_url=args.github_url, remote_name=args.fork_name
+        )
+
+    if not fork_info.owner or not fork_info.name:
+        raise RuntimeError(
+            f'Configured remote fork "{args.fork_info}" does not\n'
+            "point to the a github repository!\n"
+            "You can set it manually by running\n"
+            f"git remote set-url {args.fork_info} git@github.com:{{OWNER}}/{{PROJECT}}\n"
+            f"or change the configured remote in {conf.config_path}\n"
+        )
+
+    if repo_info.name != fork_info.name:
+        raise RuntimeError(
+            f'Configured remote fork "{args.fork_info}" is not\n'
+            f"the same repo as the remote {args.remote_info}\n"
+        )
+
     github_ep = github_real.RealGitHubEndpoint(
         oauth_token=args.github_oauth, proxy=args.proxy, github_url=args.github_url
     )
     try:
-        yield github_ep, repo_info
+        yield github_ep, repo_info, fork_info
     finally:
         await github_ep.close()
 
@@ -310,12 +332,17 @@ async def main() -> int:  # pylint: disable=too-many-statements, too-many-locals
     async with github_connection(args=args, git_ctx=git_ctx, conf=conf) as (
         github_ep,
         repo_info,
+        fork_info,
     ):
         if args.cmd == "upload":
             from revup import upload
 
             return await upload.main(
-                args=args, git_ctx=git_ctx, github_ep=github_ep, repo_info=repo_info
+                args=args,
+                git_ctx=git_ctx,
+                github_ep=github_ep,
+                repo_info=repo_info,
+                fork_info=fork_info,
             )
 
     return 1
