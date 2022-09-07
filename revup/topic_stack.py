@@ -1,4 +1,3 @@
-# pylint: disable=too-many-lines
 from __future__ import annotations
 
 import logging
@@ -90,7 +89,7 @@ class PushStatus(Enum):
 
 
 @dataclass
-class Review:  # pylint: disable=too-many-instance-attributes
+class Review:
     """
     Represents a single github pull request. Uniquely keyed by topic name and base branch.
     """
@@ -268,7 +267,7 @@ class TopicStack:
         self, review: Review, orig: Optional[PrComment]
     ) -> Optional[PrComment]:
         if (
-            review.push_status != PushStatus.PUSHED  # pylint: disable=too-many-boolean-expressions
+            review.push_status != PushStatus.PUSHED
             or review.status == PrStatus.MERGED
             or not self.repo_info
             or not self.fork_info
@@ -406,7 +405,7 @@ class TopicStack:
         if len(self.topics) == 0:
             raise RevupUsageException(f"Found {len(self.commits)} commits but no topic tags!")
 
-    async def populate_reviews(  # pylint: disable=too-many-branches, too-many-statements, too-many-locals
+    async def populate_reviews(
         self,
         uploader: str,
         force_relative_chain: bool = False,
@@ -594,7 +593,7 @@ class TopicStack:
 
             seen_topics[name] = topic
 
-    async def mark_rebases(self, skip_rebase: bool) -> None:  # pylint: disable=too-many-statements
+    async def mark_rebases(self, skip_rebase: bool) -> None:
         """
         Scan all topics and compare patch-ids to remote patch-ids. Appropriately mark any
         changes that are already merged, or where push can be skipped due to being rebases or
@@ -1164,7 +1163,7 @@ class TopicStack:
             if not review.pr_info:
                 continue
             if (
-                review.pr_update.baseRef is not None  # pylint: disable=too-many-boolean-expressions
+                review.pr_update.baseRef is not None
                 or review.pr_update.body is not None
                 or review.pr_update.title is not None
                 or review.pr_update.reviewer_ids

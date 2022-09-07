@@ -86,9 +86,7 @@ async def parse_ref_or_topic(ref_or_topic: str, args: argparse.Namespace, git_ct
         raise RevupUsageException("Can't have both --no-parse-refs and --no-parse-topics!")
 
 
-async def main(  # pylint: disable=too-many-statements, too-many-branches
-    args: argparse.Namespace, git_ctx: git.Git
-) -> int:
+async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
     """
     Amend the given commit and recreate the history on top of that commit to make
     a new head commit with the same tree as the cache. Then, soft reset to that commit.

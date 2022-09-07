@@ -107,12 +107,6 @@ disable=raw-checker-failed,
         wrong-import-position,
         unnecessary-lambda-assignment,
 
-        # These have some false positives and mypy seems to handle them much better
-        abstract-method,
-        arguments-differ,
-        unpacking-non-sequence,
-        unsubscriptable-object,
-
         # Would be nice to drive these to 0
         consider-using-f-string,
         missing-class-docstring,
@@ -120,12 +114,12 @@ disable=raw-checker-failed,
         missing-module-docstring,
         too-many-arguments,
         too-many-branches,
+        too-many-boolean-expressions,
         too-many-instance-attributes,
         too-many-lines,
         too-many-locals,
         too-many-return-statements,
         too-many-statements,
-        wrong-import-order,
 
 # Enable the message, report, category or checker with the given id(s). You can
 # either give multiple identifier separated by comma (,) or put this option

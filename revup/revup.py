@@ -202,7 +202,7 @@ async def github_connection(
         await github_ep.close()
 
 
-async def main() -> int:  # pylint: disable=too-many-statements, too-many-locals
+async def main() -> int:
     # Description / help text isn't given to the parser since the actual
     # help text is in the markdown files.
     revup_parser = make_toplevel_parser()
