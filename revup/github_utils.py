@@ -385,6 +385,8 @@ async def query_everything(
 async def create_pull_requests(
     github_ep: github.GitHubEndpoint,
     repo_id: str,
+    repo_info: GitHubRepoInfo,
+    fork_info: GitHubRepoInfo,
     prs: List[PrInfo],
 ) -> None:
     """
@@ -392,12 +394,15 @@ async def create_pull_requests(
     """
     inputs = []
     for pr in prs:
+        headRef = (
+            pr.headRef if fork_info.owner == repo_info.owner else f"{fork_info.owner}:{pr.headRef}"
+        )
         inputs.append(
             {
                 "baseRefName": pr.baseRef,
                 "body": pr.body,
                 "clientMutationId": "revup",
-                "headRefName": pr.headRef,
+                "headRefName": headRef,
                 "repositoryId": repo_id,
                 "title": pr.title,
                 "draft": pr.is_draft,

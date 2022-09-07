@@ -147,9 +147,27 @@ This is a non-exhausive intro to some more handy revup features.
 
 For a full description of features, see the [docs](https://github.com/Skydio/revup/tree/main/docs) or run `revup -h` or `revup upload -h` to view docs in `man` format.
 
+## Work with forks
+
+For contributing to projects that you may not have push access to, revup can be configured to push to a fork while creating a pull request in the main project.
+
+Add git remotes for both the original and fork.
+```
+$ git remote -v
+origin  https://github.com/ORIGINAL_OWNER/REPO_NAME.git (fetch)
+origin  https://github.com/ORIGINAL_OWNER/REPO_NAME.git (push)
+myfork  https://github.com/YOUR_USERNAME/REPO_NAME.git (fetch)
+myfork  https://github.com/YOUR_USERNAME/REPO_NAME.git (push)
+```
+
+When uploading, pass the remote to create the pull request in as `--remote-name` and the forked remote as `--fork-name`.
+```
+revup --remote-name origin --fork-name myfork upload
+```
+
 ## Add reviewers / labels
 
-Revup can add additional items to reviews to save you time with the github interface. These all work through tags in commit messages.
+Revup can also add reviewers, assignees, and labels to pull requests. Add the appropriate tags to any commit in a topic.
 
 ```
 Reviewers: alice, bob
@@ -214,9 +232,9 @@ base_branch_globs =
 
 ## User config
 
-The user config saves time by defaulting the most commonly used flags.
+The user config at `~/.revupconfig` saves time by defaulting the most commonly used flags.
 
-For example, after getting used to the workflow, a user might not need the confirmation check. Add this section to `~/.revupconfig`.
+For example, after getting used to the workflow, a user might not need the confirmation check. Adding the following lines will be the same as running with `--skip-confirm`.
 
 ```
 [upload]
