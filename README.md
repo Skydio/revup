@@ -45,7 +45,7 @@ You can also build and install locally
 
 ```
 git clone https://github.com/Skydio/revup.git && cd revup
-make package && make install
+make deps && make package && make install
 ```
 
 # Tutorial
@@ -115,7 +115,10 @@ Now let's update a pull request.
 
 ```sh
 echo heh >> bar; git add bar
-revup amend HEAD~ --no-edit
+# Either
+revup amend HEAD~ --no-edit  # Specify a commit to amend
+# or
+revup amend bar --no-edit  # Specify a topic name to amend
 
 revup upload
 ```
