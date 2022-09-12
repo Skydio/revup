@@ -37,7 +37,7 @@ clean:
 	rm -rf $(BUILD_DIR)
 	rm -rf .mypy_cache
 
-package:
+package: man
 	$(PYTHON) -m build --outdir $(BUILD_DIR)
 
 REVUP_VERSION:=$(shell $(PYTHON) revup/__init__.py)
