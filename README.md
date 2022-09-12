@@ -1,8 +1,8 @@
 <p align="center">
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Skydio/revup/main/docs/images/revup_dark.svg"/>
-  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/Skydio/revup/main/docs/images/revup_light.svg"/>
-  <img alt="Revup"/>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Skydio/revup/main/docs/images/revup_dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/Skydio/revup/main/docs/images/revup_light.svg">
+  <img alt="Revup" src="https://raw.githubusercontent.com/Skydio/revup/main/docs/images/revup_light.svg"/>
 </picture>
 </p>
 
