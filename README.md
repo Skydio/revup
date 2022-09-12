@@ -1,5 +1,10 @@
-![Revup](docs/images/revup_light.png#gh-light-mode-only)
-![Revup](docs/images/revup_dark.png#gh-dark-mode-only)
+<p align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/revup_dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/revup_light.svg">
+  <img alt="Revup">
+</picture>
+</p>
 
 <p align="center">
 <a href="https://github.com/Skydio/revup"><img alt="Source Code" src="https://img.shields.io/badge/source-code-blue" /></a>
