@@ -47,6 +47,12 @@ REVUP_HEADER=---\ntitle: TITLE\nsection: 1\nheader: Revup Manual\nfooter: revup 
 install:
 	$(PYTHON) -m pip install build/revup-$(REVUP_VERSION)-py3-none-any.whl --force-reinstall
 
+upload_check:
+	$(PYTHON) -m twine check build/revup-$(REVUP_VERSION).tar.gz
+
+upload_test:
+	$(PYTHON) -m twine upload --repository testpypi build/revup-$(REVUP_VERSION).tar.gz
+
 upload:
 	$(PYTHON) -m twine upload build/revup-$(REVUP_VERSION).tar.gz
 
