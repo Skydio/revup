@@ -381,9 +381,9 @@ class TopicStack:
             if not parsed_tags[TAG_TOPIC]:
                 if auto_topic:
                     parsed_tags[TAG_TOPIC].add(
-                        "_".join(trimmed_msg.split()[:5]).translate(
-                            {ord(":"): None, ord("["): None, ord("]"): None}
-                        )
+                        "_".join(
+                            trimmed_msg.split("\n", maxsplit=1)[0].lower().split()[:5]
+                        ).translate({ord(":"): None, ord("["): None, ord("]"): None})
                     )
                 else:
                     # No topic tags, not a revup commit
