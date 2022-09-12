@@ -381,7 +381,7 @@ class TopicStack:
             if not parsed_tags[TAG_TOPIC]:
                 if auto_topic:
                     parsed_tags[TAG_TOPIC].add(
-                        "_".join(trimmed_msg.split()[:5]).translate(
+                        "_".join(trimmed_msg.split("\n")[0].lower().split()[:5]).translate(
                             {ord(":"): None, ord("["): None, ord("]"): None}
                         )
                     )
