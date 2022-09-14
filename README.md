@@ -28,7 +28,7 @@ Revup provides command-line tools that allow developers to iterate faster on par
 
 # Compatibility
 
-Revup requires python 3.8 or higher and git 3.6 or higher. Revup works with Linux, OSX, and Windows (limited testing).
+Revup requires python 3.8 or higher and git 2.36 or higher. Revup works with Linux, OSX, and Windows (limited testing).
 
 Follow instructions [here](https://git-scm.com/downloads) to get the latest git version. Revup uses flags only present in newer git versions.
 
