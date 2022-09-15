@@ -6,7 +6,7 @@ all: deps lint man package install
 
 # Install dependent pip packages, needed to lint or build
 deps:
-	$(PYTHON) -m pip install black isort pylint mypy build twine
+	$(PYTHON) -m pip install black isort pylint mypy build twine pytest pytest-mock
 	$(PYTHON) -m pip install .
 
 # Format using black
@@ -65,5 +65,8 @@ man:
 		cat - $${file} | pandoc -s -t man > ../revup/man1/$${CMD_NAME}.1 || exit 1 ; \
 		gzip -n -f -k ../revup/man1/$${CMD_NAME}.1 || exit 1 ; \
 	done
+
+test:
+	$(PYTHON) -m pytest tests/
 
 .PHONY: all deps man install package format check_format check_types pylint lint clean
