@@ -469,6 +469,17 @@ class TopicStack:
                         )
                         relative_topic = ""
 
+            if (
+                self.repo_info
+                and self.fork_info
+                and self.fork_info.owner != self.repo_info.owner
+                and (relative_topic or len(topic.tags[TAG_RELATIVE_BRANCH]) > 1)
+            ):
+                raise RevupUsageException(
+                    "Can't use 'Relative' or 'Relative-Branch' across forks due to github"
+                    " limitations!"
+                )
+
             if relative_topic:
                 topic.relative_topic = self.topics[relative_topic]
                 if len(topic.tags[TAG_BRANCH]) == 0:
