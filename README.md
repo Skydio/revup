@@ -16,7 +16,9 @@
 
 Revup provides command-line tools that allow developers to iterate faster on parallel changes and reduce the overhead of creating and maintaining code reviews.
 
-![tutorial_1](https://raw.githubusercontent.com/Skydio/revup/main/docs/images/tutorial_1.gif)
+<p align="center">
+<img alt="intro_gif" src="https://raw.githubusercontent.com/Skydio/revup/main/docs/images/tutorial_1.gif"/>
+</p>
 
 # Features
 
