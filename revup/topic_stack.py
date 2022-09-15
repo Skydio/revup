@@ -469,6 +469,19 @@ class TopicStack:
                         )
                         relative_topic = ""
 
+            if self.repo_info and self.fork_info and self.fork_info.owner != self.repo_info.owner:
+                if len(topic.tags[TAG_RELATIVE_BRANCH]) > 1:
+                    raise RevupUsageException(
+                        "Can't use 'Relative-Branch' across forks due to github limitations!"
+                    )
+                if relative_topic:
+                    logging.warning(
+                        f"Skipping topic '{name}' since github does not allow relative reviews"
+                        f" across forks. It will be uploaded when '{relative_topic}' merges."
+                    )
+                    del self.topics[name]
+                    continue
+
             if relative_topic:
                 topic.relative_topic = self.topics[relative_topic]
                 if len(topic.tags[TAG_BRANCH]) == 0:
