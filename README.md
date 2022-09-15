@@ -16,11 +16,12 @@
 
 Revup provides command-line tools that allow developers to iterate faster on parallel changes and reduce the overhead of creating and maintaining code reviews.
 
+![tutorial_1](https://raw.githubusercontent.com/Skydio/revup/main/docs/images/tutorial_1.gif)
+
 # Features
 
-- Creates multiple independent and relative github pull requests with a single command
+- Revup creates multiple independent chains of branches for you in the background and without touching your working tree. It then creates and manages github pull requests for all those branches.
 - Pull requests target the actual base branch and can be merged manually or by continuous integration
-- Doesn't touch the local workspace or invalidate builds
 - Rebase detection saves time and continuous integration cost by not re-pushing if the patch hasn't changed
 - Adds reviewers, labels, and creates drafts all from the commit text
 - Adds auto-updating "review graph" and "patchsets" elements to make pull requests easier to navigate
@@ -30,7 +31,7 @@ Revup provides command-line tools that allow developers to iterate faster on par
 
 Revup requires python 3.8 or higher and git 2.36 or higher. Revup works with Linux, OSX, and Windows (limited testing).
 
-Follow instructions [here](https://git-scm.com/downloads) to get the latest git version. Revup uses flags only present in newer git versions.
+Follow instructions [here](https://git-scm.com/downloads) to get the latest git version for your OS. Revup uses flags only present in newer git versions.
 
 # Installing
 
@@ -46,7 +47,7 @@ Verify that installation was successful by showing the help page.
 revup -h
 ```
 
-You can also build and install locally
+You can also build from source to get the latest updates.
 
 ```
 git clone https://github.com/Skydio/revup.git && cd revup
@@ -59,6 +60,13 @@ This tutorial will guide you through using basic revup features.
 
 ## First time setup
 
+Clone a sandbox repo by [forking](https://github.com/Skydio/revup/fork) revup, creating a [new](https://github.com/new) repo, or using some other repo you own.
+Creating test PRs can be spammy so don't do the tutorial on other people's repos.
+
+```sh
+git clone https://github.com/<your-name>/revup.git && cd revup
+```
+
 On first run, revup will prompt you to add github credentials
 ```sh
 revup upload
@@ -66,13 +74,6 @@ revup upload
 Create a personal access token [here](https://github.com/settings/tokens/new) and check the box for "full repo permissions". Revup needs this in order to create and modify pull requests.
 
 ## Create independent pull requests
-
-Clone a sandbox repo by [forking](https://github.com/Skydio/revup/fork) revup, creating a [new](https://github.com/new) repo, or using some other repo you own.
-Creating test PRs can be spammy so don't do the tutorial on other people's repos.
-
-```sh
-git clone https://github.com/<your-name>/revup.git
-```
 
 Make your first two commits that will become two separate pull requests.
 Note the "Topic:" tag in the commit message - this is what causes revup to recognize and act on a commit.
