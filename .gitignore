@@ -1,5 +1,4 @@
 build/
 revup.egg-info/
-revup/man1/*.1
-revup/man1/*.1.gz
+revup/man1/
 __pycache__
