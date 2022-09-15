@@ -32,3 +32,5 @@ jobs:
         name: Generate the distribution package
       - run: PYTHON=python make upload_check
         name: Check the README markdown
+      - run: PYTHON=python make test
+        name: Run unit tests
