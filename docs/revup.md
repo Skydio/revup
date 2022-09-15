@@ -49,6 +49,10 @@ that should be used to push branches to. The pull request will be created
 using the branch from this fork. If empty, remote-name is used for both
 pushing and creating the pull request.
 
+Github does not allow base branches of pull requests to be in a different
+fork, so reviews with a Relative: label will be deferred until its base
+merges. Relative-Branch cannot be used across forks.
+
 **--editor**
 : The user's preferred editor, used for various message and file
 editing. If not set, value is taken first from "git config core.editor"
