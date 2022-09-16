@@ -713,7 +713,7 @@ class TopicStack:
                         # TODO: We can do more optimization by reusing the remote trees.
                         # We wouldn't benefit as much from skipping the push, but we'd save time
                         # on creating commits.
-                        continue
+                        pass
 
             if review.is_pure_rebase and review.pr_info is not None:
                 # For a relative series of reviews, revup will only ever upload them directly
