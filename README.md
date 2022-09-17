@@ -1,9 +1,13 @@
 <p align="center">
+<!-- PYPI_REMOVE -->
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Skydio/revup/main/docs/images/revup_dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/Skydio/revup/main/docs/images/revup_light.svg">
-  <img alt="Revup" src="https://raw.githubusercontent.com/Skydio/revup/main/docs/images/revup_light.svg"/>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/revup_dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/revup_light.svg">
+<!-- /PYPI_REMOVE -->
+  <img alt="Revup" src="docs/images/revup_light.svg"/>
+<!-- PYPI_REMOVE -->
 </picture>
+<!-- /PYPI_REMOVE -->
 </p>
 
 <p align="center">
@@ -17,7 +21,7 @@
 Revup provides command-line tools that allow developers to iterate faster on parallel changes and reduce the overhead of creating and maintaining code reviews.
 
 <p align="center">
-<img alt="intro_gif" src="https://raw.githubusercontent.com/Skydio/revup/main/docs/images/tutorial_1.gif"/>
+<img alt="intro_gif" src="docs/images/tutorial_1.gif"/>
 </p>
 
 # Features
@@ -90,11 +94,11 @@ git commit -m "My first revup bar" -m "Topic: bar"
 revup upload
 ```
 
-![tutorial_1](https://raw.githubusercontent.com/Skydio/revup/main/docs/images/tutorial_1.gif)
+![tutorial_1](docs/images/tutorial_1.gif)
 
 You've uploaded your first revup changes! Notice how in github, both branches target 'main'. This allows them to be merged independently.
 
-<img src="https://raw.githubusercontent.com/Skydio/revup/main/docs/images/foo_github.png" width="50%"><img src="https://raw.githubusercontent.com/Skydio/revup/main/docs/images/bar_github.png" width="50%">
+<img src="docs/images/foo_github.png" width="50%"><img src="docs/images/bar_github.png" width="50%">
 
 Under the hood, revup creates and pushes these branches for you, tracking and managing the dependencies as needed.
 
@@ -109,7 +113,7 @@ git commit -m "My second revup foo" -m "Topic: foo2" -m "Relative: foo"
 revup upload
 ```
 
-![tutorial_2](https://raw.githubusercontent.com/Skydio/revup/main/docs/images/tutorial_2.gif)
+![tutorial_2](docs/images/tutorial_2.gif)
 
 With this simple but powerful model, you can upload independent and dependent changes all at once.
 
@@ -131,7 +135,7 @@ revup amend bar --no-edit  # Specify a topic name to amend
 revup upload
 ```
 
-![tutorial_3](https://raw.githubusercontent.com/Skydio/revup/main/docs/images/tutorial_3.gif)
+![tutorial_3](docs/images/tutorial_3.gif)
 
 `revup amend` makes it easy to modify commits in your history. You also have other options for modifying reviews:
 
@@ -212,11 +216,11 @@ revup upload --base-branch custom-branch-name
 
 Revup will add 2 comments in every pull request to provide helpful features for users and reviewers. These are enabled by default and automatically updated as the pull request changes.
 
-<img src="https://raw.githubusercontent.com/Skydio/revup/main/docs/images/review_graph.png" width="40%">
+<img src="docs/images/review_graph.png" width="40%">
 
 The review graph provides links and titles to all local pull requests that have a relative relationship with the current pull request, including any that it depends on, or that depend on it. This allows you to quickly browse between pull requests in a chain.
 
-<img src="https://raw.githubusercontent.com/Skydio/revup/main/docs/images/patchsets.png" width="80%">
+<img src="docs/images/patchsets.png" width="80%">
 
 The patchsets table provides a history of uploads for a given pull request as well as links and summaries of the diff between each upload. Notably, revup specially handles
 the case where you rebase then upload and will show you a diff with upstream files excluded.
