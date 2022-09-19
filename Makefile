@@ -37,12 +37,13 @@ clean:
 	rm -rf $(BUILD_DIR)
 	rm -rf .mypy_cache
 
-package: man
-	$(PYTHON) -m build --outdir $(BUILD_DIR)
-
 REVUP_VERSION:=$(shell $(PYTHON) revup/__init__.py)
 REVUP_DATE ?= Apr 21, 2021
 REVUP_HEADER=---\ntitle: TITLE\nsection: 1\nheader: Revup Manual\nfooter: revup VERSION\ndate: DATE\n---\n
+REVUP_VERSION_HASH?=${shell git rev-parse --short v$(REVUP_VERSION) || echo main}
+
+package: man
+	REVUP_VERSION_HASH=$(REVUP_VERSION_HASH) $(PYTHON) -m build --outdir $(BUILD_DIR)
 
 install:
 	$(PYTHON) -m pip install build/revup-$(REVUP_VERSION)-py3-none-any.whl --force-reinstall

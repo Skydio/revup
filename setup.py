@@ -1,28 +1,8 @@
+import os
 import re
-import subprocess
 from pathlib import Path
 
 from setuptools import setup
-
-# Populates the __version__ variable
-with open("revup/__init__.py") as f:
-    exec(f.read())
-
-
-def tag_rev() -> str:
-    """
-    Get the git sha of the current version from the tag
-    """
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--short", f"v{__version__}"],
-            check=True,
-            text=True,
-            stdout=subprocess.PIPE,
-        )
-        return result.stdout.strip()
-    except subprocess.CalledProcessError:
-        return "main"
 
 
 def fixed_readme() -> str:
@@ -39,10 +19,13 @@ def fixed_readme() -> str:
         flags=re.MULTILINE | re.DOTALL,
     )
 
+    # Git hash of the commit tagged with the current version. Set by Makefile.
+    revup_version_hash = os.environ.get("REVUP_VERSION_HASH", "main")
+
     # Replace relative links with absolute, so images appear correctly on PyPI
     readme = readme.replace(
         "docs/images/",
-        f"https://raw.githubusercontent.com/skydio/revup/{tag_rev()}/docs/images/",
+        f"https://raw.githubusercontent.com/skydio/revup/{revup_version_hash}/docs/images/",
     )
 
     return readme
