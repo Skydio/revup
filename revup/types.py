@@ -1,4 +1,4 @@
-from typing import NewType
+from typing import Dict, NewType
 
 # A bunch of commonly used type definitions.
 
@@ -22,3 +22,13 @@ class RevupUsageException(Exception):
 
 class RevupConflictException(Exception):
     pass
+
+
+class RevupShellException(Exception):
+    pass
+
+
+class RevupGithubException(Exception):
+    def __init__(self, error_json: Dict):
+        super().__init__()
+        self.error_json = error_json

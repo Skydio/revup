@@ -4,7 +4,7 @@ from typing import Any
 
 class GitHubEndpoint(metaclass=ABCMeta):
     @abstractmethod
-    async def graphql(self, query: str, require_success: bool = True, **kwargs: Any) -> Any:
+    async def graphql(self, query: str, **kwargs: Any) -> Any:
         """
         Args:
             query: string GraphQL query to execute
