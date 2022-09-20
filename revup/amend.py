@@ -3,6 +3,7 @@ import asyncio
 import logging
 import re
 import subprocess
+from typing import Optional, Tuple
 
 from revup import git, topic_stack
 from revup.types import (
@@ -16,7 +17,7 @@ RE_TOPIC_WITH_MODIFIERS = re.compile(r"(?P<topic>[a-zA-Z\-_0-9]+)(?P<modifiers>[
 
 
 def invoke_editor_for_commit_msg(
-    git_ctx: git.Git, editor: str, commit_msg: str, cache_stat: str, stat: str
+    git_ctx: git.Git, editor: str, topic_summary: str, commit_msg: str, cache_stat: str, stat: str
 ) -> str:
     """
     Allow the user to modify the given commit msg by opening an editor.
@@ -31,7 +32,7 @@ def invoke_editor_for_commit_msg(
     stat_text = "\n\n".join(full_stat)
 
     comment_text = f"""\nPlease enter the commit message for your changes. Lines starting
-with '#' will be ignored, and an empty message aborts the commit.\n\n{stat_text}"""
+with '#' will be ignored, and an empty message aborts the commit.\n{topic_summary}\n{stat_text}"""
     comment_text = "\n# ".join(comment_text.splitlines())
 
     with open(git_ctx.get_scratch_dir() + "/COMMIT_EDITMSG", mode="w") as temp_file:
@@ -45,13 +46,43 @@ with '#' will be ignored, and an empty message aborts the commit.\n\n{stat_text}
     return re.sub(r"^\s*#.*$", "", msg, flags=re.M).strip()
 
 
-async def parse_ref_or_topic(ref_or_topic: str, args: argparse.Namespace, git_ctx: git.Git) -> str:
+async def get_topic_summary(
+    args: argparse.Namespace,
+    git_ctx: git.Git,
+    topics: Optional[topic_stack.TopicStack],
+) -> str:
+    if topics is None and args.parse_topics:
+        topics = topic_stack.TopicStack(
+            git_ctx,
+            args.base_branch,
+            args.relative_branch,
+            None,
+            None,
+        )
+
+        try:
+            await topics.populate_topics()
+
+        except RevupUsageException:
+            # An error occured or no topic tags were found. Continue without topics
+            return ""
+
+    if isinstance(topics, topic_stack.TopicStack) and len(topics.topics) > 0:
+        topic_lines = "\n " + "\n ".join(topics.topics.keys()) + "\n"
+        return f"Topics found between HEAD and {topics.relative_branch}{topic_lines}"
+
+    return ""
+
+
+async def parse_ref_or_topic(
+    ref_or_topic: str, args: argparse.Namespace, git_ctx: git.Git
+) -> Tuple[str, Optional[topic_stack.TopicStack]]:
     """
     Parse and return the hash of the commit that is referred to by the given topic or commit-ish.
     """
     if args.parse_refs:
         if await git_ctx.is_branch_or_commit(ref_or_topic):
-            return ref_or_topic
+            return ref_or_topic, None
 
     if args.parse_topics:
         match = RE_TOPIC_WITH_MODIFIERS.match(ref_or_topic)
@@ -71,7 +102,7 @@ async def parse_ref_or_topic(ref_or_topic: str, args: argparse.Namespace, git_ct
             if topic in topics.topics:
                 ref = topics.topics[topic].original_commits[-1].commit_id + modifiers
                 if await git_ctx.is_branch_or_commit(ref):
-                    return ref
+                    return ref, topics
 
     if args.parse_refs and args.parse_topics:
         raise RevupUsageException(f"{ref_or_topic} is not a valid topic, commit, or branch name!")
@@ -113,8 +144,9 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
     if has_unstaged:
         await git_ctx.git("add", "--update")
 
+    topics = None
     if args.ref_or_topic:
-        commit = await parse_ref_or_topic(args.ref_or_topic, args, git_ctx)
+        commit, topics = await parse_ref_or_topic(args.ref_or_topic, args, git_ctx)
 
         if not await git_ctx.is_ancestor(f"{commit}~", "HEAD"):
             raise RevupUsageException(
@@ -152,6 +184,7 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
         new_msg = invoke_editor_for_commit_msg(
             git_ctx,
             git_ctx.editor,
+            await get_topic_summary(args, git_ctx, topics),
             stack[0].commit_msg,
             await git_ctx.git_stdout("--no-pager", "diff", "--cached", "--stat", "--no-color")
             if has_diff
