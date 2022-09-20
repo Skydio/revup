@@ -76,12 +76,19 @@ async def main(
             return 1
 
     if args.pre_upload:
-        try:
-            # Wait until we're sure there aren't any conflicts before running pre upload command
-            with get_console().status("Running pre-upload command"):
-                subprocess.check_call(args.pre_upload, shell=True, cwd=git_ctx.sh.cwd)
-        except Exception as e:
-            raise RevupShellException from e
+        # Wait until we're sure there aren't any conflicts before running pre upload command
+        with get_console().status("Running pre-upload command"):
+            result = subprocess.run(
+                args.pre_upload,
+                shell=True,
+                cwd=git_ctx.sh.cwd,
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                encoding="utf-8",
+            )
+            if result.returncode != 0:
+                raise RevupShellException(f"Pre-upload command failed:\n{result.stdout}")
 
     with get_console().status("Pushing remote branches…"):
         if args.patchsets:
