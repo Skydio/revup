@@ -96,6 +96,9 @@ Revup is comprised of several sub-commands.
 : Modify a commit in the current stack using the contents of the
 cache. Can also change the commit text.
 
+**revup commit**
+: A convenience wrapper for revup amend --insert
+
 **revup cherry-pick**
 : Create a squashed commit that represents the changes made in the
 given branch relative to its base branch, then cherry-pick it.

@@ -217,7 +217,7 @@ async def main() -> int:
         "cherry-pick",
         add_help=False,
     )
-    amend_parser = subparsers.add_parser("amend", add_help=False)
+    amend_parser = subparsers.add_parser("amend", aliases=["commit"], add_help=False)
 
     for p in [upload_parser, restack_parser, amend_parser]:
         # Some args are used by both upload and restack
@@ -319,8 +319,11 @@ async def main() -> int:
 
         return await cherry_pick.main(args=args, git_ctx=git_ctx)
 
-    elif args.cmd == "amend":
+    elif args.cmd in ["commit", "amend"]:
         from revup import amend
+
+        # "commit" is an alias of "amend --insert"
+        args.insert = args.cmd == "commit" or args.insert
 
         return await amend.main(args=args, git_ctx=git_ctx)
 
