@@ -47,7 +47,7 @@ use the old commit message as-is.
 
 **--insert, -i**
 : Instead of amending the given commit, insert the changes in cache
-as a new commit before the given commit. If there are no changes in
+as a new commit after the given commit. If there are no changes in
 cache, this inserts an empty commit. Cannot be used with --no-edit,
 since the new commit requires a commit message.
 

@@ -1,6 +1,5 @@
 import argparse
 import asyncio
-import copy
 import logging
 import re
 import subprocess
@@ -138,9 +137,8 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
         raise RevupUsageException(f"Couldn't find any commits between HEAD and {commit}~")
 
     if args.insert:
-        # Create a new empty commit with the same tree as its parent
-        stack.insert(0, copy.deepcopy(stack[0]))
-        stack[0].tree = GitTreeHash(f"{stack[0].parents[0]}^{{tree}}")
+        # Create a new empty commit after the given commit
+        stack[0].parents = [stack[0].commit_id]
         # Clear commit specific fields
         stack[0].author_name = ""
         stack[0].author_email = ""
