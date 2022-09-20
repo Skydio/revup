@@ -6,7 +6,7 @@ from typing import Optional
 from rich import get_console
 
 from revup import git, github, github_utils, topic_stack
-from revup.types import GitConflictException
+from revup.types import GitConflictException, RevupShellException
 
 
 async def main(
@@ -76,9 +76,12 @@ async def main(
             return 1
 
     if args.pre_upload:
-        # Wait until we're sure there aren't any conflicts before running pre upload command
-        with get_console().status("Running pre-upload command"):
-            subprocess.check_call(args.pre_upload, shell=True, cwd=git_ctx.sh.cwd)
+        try:
+            # Wait until we're sure there aren't any conflicts before running pre upload command
+            with get_console().status("Running pre-upload command"):
+                subprocess.check_call(args.pre_upload, shell=True, cwd=git_ctx.sh.cwd)
+        except Exception as e:
+            raise RevupShellException from e
 
     with get_console().status("Pushing remote branches…"):
         if args.patchsets:
@@ -87,13 +90,14 @@ async def main(
         # Must push refs after creating them. Includes the virtual diff branch for patchsets.
         await topics.push_git_refs(git_ctx.author, args.create_local_branches)
 
-    # Must create PRs after refs are pushed, and must update PRs after creating them.
-    with get_console().status("Updating github PRs…"):
-        await topics.create_prs()
-        if args.review_graph:
-            # Review graph requires populated PR urls from creation
-            topics.populate_review_graph()
-        await topics.update_prs()
-
-    topics.print(not args.verbose)
+    try:
+        # Must create PRs after refs are pushed, and must update PRs after creating them.
+        with get_console().status("Updating github PRs…"):
+            await topics.create_prs()
+            if args.review_graph:
+                # Review graph requires populated PR urls from creation
+                topics.populate_review_graph()
+            await topics.update_prs()
+    finally:
+        topics.print(not args.verbose)
     return 0

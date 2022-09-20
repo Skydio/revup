@@ -3,7 +3,12 @@ import logging
 import sys
 
 from revup.revup import main
-from revup.types import RevupConflictException, RevupUsageException
+from revup.types import (
+    RevupConflictException,
+    RevupGithubException,
+    RevupShellException,
+    RevupUsageException,
+)
 
 
 def _main() -> None:
@@ -16,6 +21,15 @@ def _main() -> None:
     except RevupConflictException as e:
         logging.error(str(e))
         sys.exit(3)
+    except RevupShellException as e:
+        logging.error(str(e))
+        sys.exit(4)
+    except RevupGithubException as e:
+        for error in e.error_json:
+            logging.error("{}: {}".format(error["type"], error["message"]))
+
+        logging.warning("{} operations failed!".format(len(e.error_json)))
+        sys.exit(5)
 
 
 if __name__ == "__main__":

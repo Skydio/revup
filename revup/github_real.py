@@ -6,6 +6,7 @@ from typing import Any, Optional, Tuple, Union
 from aiohttp import ClientSession
 
 from revup import github
+from revup.types import RevupGithubException
 
 
 class RealGitHubEndpoint(github.GitHubEndpoint):
@@ -51,7 +52,7 @@ class RealGitHubEndpoint(github.GitHubEndpoint):
         if self.session:
             await self.session.close()
 
-    async def graphql(self, query: str, require_success: bool = True, **kwargs: Any) -> Any:
+    async def graphql(self, query: str, **kwargs: Any) -> Any:
         if self.session is None:
             self.session = ClientSession()
 
@@ -82,15 +83,7 @@ class RealGitHubEndpoint(github.GitHubEndpoint):
                 pretty_json = json.dumps(r, indent=1)
                 logging.debug("Response JSON:\n{}".format(pretty_json))
 
-            # Actually, this code is dead on the GitHub GraphQL API, because
-            # they seem to always return 200, even in error case (as of
-            # 11/5/2018)
-            try:
-                resp.raise_for_status()
-            except Exception as exc:
-                raise RuntimeError(pretty_json) from exc
-
-        if "errors" in r and require_success:
-            raise RuntimeError(pretty_json)
+            if "errors" in r:
+                raise RevupGithubException(r["errors"])
 
         return r
