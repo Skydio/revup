@@ -918,6 +918,7 @@ class TopicStack:
                 "push",
                 "--force",
                 "--no-verify",
+                "--atomic",
                 "--quiet" if self.git_ctx.sh.quiet else "--verbose",
                 self.git_ctx.remote_name,
                 *push_targets,
