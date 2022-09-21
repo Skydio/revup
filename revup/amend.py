@@ -3,7 +3,6 @@ import asyncio
 import logging
 import re
 import subprocess
-from typing import Optional, Tuple
 
 from revup import git, topic_stack
 from revup.types import (
@@ -46,43 +45,28 @@ with '#' will be ignored, and an empty message aborts the commit.\n{topic_summar
     return re.sub(r"^\s*#.*$", "", msg, flags=re.M).strip()
 
 
-async def get_topic_summary(
-    args: argparse.Namespace,
-    git_ctx: git.Git,
-    topics: Optional[topic_stack.TopicStack],
-) -> str:
-    if topics is None and args.parse_topics:
-        topics = topic_stack.TopicStack(
-            git_ctx,
-            args.base_branch,
-            args.relative_branch,
-            None,
-            None,
-        )
+async def get_topic_summary(topics: topic_stack.TopicStack) -> str:
+    await topics.populate_topics()
 
-        try:
-            await topics.populate_topics()
+    if len(topics.topics) == 0:
+        return ""
 
-        except RevupUsageException:
-            # An error occured or no topic tags were found. Continue without topics
-            return ""
-
-    if isinstance(topics, topic_stack.TopicStack) and len(topics.topics) > 0:
-        topic_lines = "\n " + "\n ".join(topics.topics.keys()) + "\n"
-        return f"Topics found between HEAD and {topics.relative_branch}{topic_lines}"
-
-    return ""
+    topic_lines = "".join([f"  {topic}\n" for topic in topics.topics.keys()])
+    return f"\nTopics found between HEAD and {topics.relative_branch}:\n{topic_lines}"
 
 
 async def parse_ref_or_topic(
-    ref_or_topic: str, args: argparse.Namespace, git_ctx: git.Git
-) -> Tuple[str, Optional[topic_stack.TopicStack]]:
+    ref_or_topic: str,
+    args: argparse.Namespace,
+    git_ctx: git.Git,
+    topics: topic_stack.TopicStack,
+) -> str:
     """
     Parse and return the hash of the commit that is referred to by the given topic or commit-ish.
     """
     if args.parse_refs:
         if await git_ctx.is_branch_or_commit(ref_or_topic):
-            return ref_or_topic, None
+            return ref_or_topic
 
     if args.parse_topics:
         match = RE_TOPIC_WITH_MODIFIERS.match(ref_or_topic)
@@ -90,19 +74,12 @@ async def parse_ref_or_topic(
             topic = match.group("topic")
             modifiers = match.group("modifiers") or ""
 
-            topics = topic_stack.TopicStack(
-                git_ctx,
-                args.base_branch,
-                args.relative_branch,
-                None,
-                None,
-            )
             await topics.populate_topics()
 
             if topic in topics.topics:
                 ref = topics.topics[topic].original_commits[-1].commit_id + modifiers
                 if await git_ctx.is_branch_or_commit(ref):
-                    return ref, topics
+                    return ref
 
     if args.parse_refs and args.parse_topics:
         raise RevupUsageException(f"{ref_or_topic} is not a valid topic, commit, or branch name!")
@@ -144,9 +121,15 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
     if has_unstaged:
         await git_ctx.git("add", "--update")
 
-    topics = None
+    topics = topic_stack.TopicStack(
+        git_ctx,
+        args.base_branch,
+        args.relative_branch,
+        None,
+        None,
+    )
     if args.ref_or_topic:
-        commit, topics = await parse_ref_or_topic(args.ref_or_topic, args, git_ctx)
+        commit = await parse_ref_or_topic(args.ref_or_topic, args, git_ctx, topics)
 
         if not await git_ctx.is_ancestor(f"{commit}~", "HEAD"):
             raise RevupUsageException(
@@ -184,7 +167,7 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
         new_msg = invoke_editor_for_commit_msg(
             git_ctx,
             git_ctx.editor,
-            await get_topic_summary(args, git_ctx, topics),
+            await get_topic_summary(topics) if args.parse_topics else "",
             stack[0].commit_msg,
             await git_ctx.git_stdout("--no-pager", "diff", "--cached", "--stat", "--no-color")
             if has_diff
