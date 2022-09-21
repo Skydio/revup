@@ -217,6 +217,9 @@ class TopicStack:
     # All virtual diff targets for the current upload are chained into a dummy branch
     last_virtual_diff_target: Optional[GitCommitHash] = None
 
+    # Whether populate() was successfully called
+    populated: bool = False
+
     def all_reviews_iter(self) -> Iterator[Tuple[str, Topic, str, Review]]:
         """
         One liner for common iteration pattern to reduce indentation a bit.
@@ -340,6 +343,8 @@ class TopicStack:
         """
         Parse all commits and sort them into individual topics.
         """
+        if self.populated:
+            return
         if self.base_branch:
             self.base_branch = self.git_ctx.ensure_branch_prefix(self.base_branch)
             await self.git_ctx.verify_branch_or_commit(self.base_branch)
@@ -398,6 +403,7 @@ class TopicStack:
                     self.topics[name] = Topic(name)
                 self.topics[name].original_commits.append(c)
                 add_tags(self.topics[name].tags, parsed_tags)
+        self.populated = True
 
     async def populate_reviews(
         self,
