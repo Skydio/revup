@@ -372,9 +372,6 @@ class TopicStack:
             await self.git_ctx.rev_list("HEAD", branch_point, header=True, first_parent=True)
         )
 
-        if len(self.commits) == 0:
-            raise RevupUsageException(f"No changes from branch {self.relative_branch}")
-
         # Parse tags and add each commit to appropriate topics
         for c in self.commits:
             parsed_tags, trimmed_msg = self.parse_commit_tags(c.commit_msg)
@@ -401,9 +398,6 @@ class TopicStack:
                     self.topics[name] = Topic(name)
                 self.topics[name].original_commits.append(c)
                 add_tags(self.topics[name].tags, parsed_tags)
-
-        if len(self.topics) == 0:
-            raise RevupUsageException(f"Found {len(self.commits)} commits but no topic tags!")
 
     async def populate_reviews(
         self,
