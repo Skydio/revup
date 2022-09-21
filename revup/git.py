@@ -414,6 +414,16 @@ class Git:
         """
         args = ["--format", "%(refname)"]
 
+        if limit_to_base_branches:
+            if not self.base_branch_globs:
+                return [f"{self.remote_name}/{self.main_branch}"]
+            args.append(f"refs/remotes/{self.remote_name}/{self.main_branch}")
+            for b in self.base_branch_globs:
+                args.append(f"refs/remotes/{self.remote_name}/" + b)
+        else:
+            args.append(f"refs/remotes/{self.remote_name}/{self.main_branch}")
+            args.append(f"refs/remotes/{self.remote_name}/*")
+
         if prune_old:
             fork_with_main = await self.fork_point("HEAD", f"{self.remote_name}/{self.main_branch}")
             # A branch that doesn't contain the fork with main must be too old
@@ -423,14 +433,6 @@ class Git:
                     fork_with_main,
                 )
             )
-
-        if limit_to_base_branches:
-            args.append(f"refs/remotes/{self.remote_name}/{self.main_branch}")
-            for b in self.base_branch_globs:
-                args.append(f"refs/remotes/{self.remote_name}/" + b)
-        else:
-            args.append(f"refs/remotes/{self.remote_name}/{self.main_branch}")
-            args.append(f"refs/remotes/{self.remote_name}/*")
 
         RE_REMOTE_REF = re.compile(r"^refs/remotes/(?P<branch>.*)$")
         ret: List[str] = []
@@ -449,6 +451,9 @@ class Git:
         """
         branches = await self.find_remote_branches(limit_to_base_branches, True)
         candidates: List[Tuple[int, str]] = []
+
+        if len(branches) == 1:
+            return branches
 
         for b in branches:
             # If we have valid candidates, we can stop iterating once the distance is greater
