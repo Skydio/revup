@@ -1,0 +1,4 @@
+build/
+revup.egg-info/
+revup/man1/
+__pycache__

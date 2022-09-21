@@ -1,0 +1,36 @@
+name: Revup CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.8.14, 3.9.14, 3.10.7]
+    name: Run lint and install checks
+    steps:
+      - name: Install pandoc
+        run: sudo apt-get install -y pandoc
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python --version 2>&1| grep -q ${{ matrix.python-version }}
+        name: Check python version
+      - uses: actions/checkout@v3
+        name: Checkout the repo
+      - run: PYTHON=python make deps
+        name: Install python dependencies
+      - run: PYTHON=python make lint
+        name: Verify code linting
+      - run: PYTHON=python make package
+        name: Generate the distribution package
+      - run: PYTHON=python make upload_check
+        name: Check the README markdown
+      - run: PYTHON=python make test
+        name: Run unit tests
