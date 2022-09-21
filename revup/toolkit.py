@@ -47,5 +47,11 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
                 args.old_base, args.old_head, args.new_base, args.new_head, args.parent
             )
         )
+    elif args.toolkit_cmd == "fork-point":
+        await asyncio.gather(
+            git_ctx.verify_branch_or_commit(args.base),
+            git_ctx.verify_branch_or_commit(args.branch),
+        )
+        logging.info(await git_ctx.to_commit_hash(await git_ctx.fork_point(args.base, args.branch)))
 
     return 0

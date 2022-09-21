@@ -292,6 +292,11 @@ async def main() -> int:
         "--new-base", "-nb", help="New base commit (parent of old head by default)"
     )
     toolkit_diff_target.add_argument("--parent", "-p", help="Parent commit")
+    toolkit_fork_point = toolkit_subparsers.add_parser(
+        "fork-point", description="Find the first divergence between two branches"
+    )
+    toolkit_fork_point.add_argument("--branch", "-br", help="Branch to compare", required=True)
+    toolkit_fork_point.add_argument("--base", "-b", help="Base branch to compare", required=True)
 
     # Do an initial parsing pass, which handles HelpAction
     args = revup_parser.parse_args()
