@@ -49,9 +49,12 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
         )
     elif args.toolkit_cmd == "fork-point":
         await asyncio.gather(
-            git_ctx.verify_branch_or_commit(args.base),
-            git_ctx.verify_branch_or_commit(args.branch),
+            git_ctx.verify_branch_or_commit(args.branches[0]),
+            git_ctx.verify_branch_or_commit(args.branches[1]),
         )
-        logging.info(await git_ctx.to_commit_hash(await git_ctx.fork_point(args.base, args.branch)))
+        logging.info(await git_ctx.to_commit_hash(await git_ctx.fork_point(*args.branches)))
+    elif args.toolkit_cmd == "closest-branch":
+        await git_ctx.verify_branch_or_commit(args.branch[0])
+        logging.info(await git_ctx.get_best_base_branch(args.branch[0], allow_self=args.allow_self))
 
     return 0

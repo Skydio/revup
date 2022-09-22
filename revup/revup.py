@@ -295,8 +295,14 @@ async def main() -> int:
     toolkit_fork_point = toolkit_subparsers.add_parser(
         "fork-point", description="Find the first divergence between two branches"
     )
-    toolkit_fork_point.add_argument("--branch", "-br", help="Branch to compare", required=True)
-    toolkit_fork_point.add_argument("--base", "-b", help="Base branch to compare", required=True)
+    toolkit_fork_point.add_argument("branches", nargs=2, help="Branches to compare")
+    toolkit_closest_branch = toolkit_subparsers.add_parser(
+        "closest-branch", description="Find the nearest base branch to the given commit."
+    )
+    toolkit_closest_branch.add_argument("branch", nargs=1, help="Commit/branch")
+    toolkit_closest_branch.add_argument(
+        "--allow-self", action="store_true", help='Allow the branch itself to be a valid "closest"'
+    )
 
     # Do an initial parsing pass, which handles HelpAction
     args = revup_parser.parse_args()
