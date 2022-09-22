@@ -403,10 +403,10 @@ class Git:
         return branch[len(f"{self.remote_name}/") :]
 
     async def find_remote_branches(
-        self, limit_to_base_branches: bool, prune_old: bool
+        self, commit: str, limit_to_base_branches: bool, prune_old: bool
     ) -> List[str]:
         """
-        Finds all remote branches that are candidates for auto-detected base branch.
+        Finds all branches that are candidates for auto-detected base branch of the given commit.
         Optionally, limit_to_base_branches will only select those branches which match
         a branch naming glob given in the config.
         prune_old will discard invalid branches to speed up the selection process.
@@ -425,7 +425,7 @@ class Git:
             args.append(f"refs/remotes/{self.remote_name}/*")
 
         if prune_old:
-            fork_with_main = await self.fork_point("HEAD", f"{self.remote_name}/{self.main_branch}")
+            fork_with_main = await self.fork_point(commit, f"{self.remote_name}/{self.main_branch}")
             # A branch that doesn't contain the fork with main must be too old
             args.extend(
                 (
@@ -443,19 +443,22 @@ class Git:
         return ret
 
     async def get_best_base_branch_candidates(
-        self, commit: str, limit_to_base_branches: bool = True
+        self, commit: str, limit_to_base_branches: bool = True, allow_self: bool = True
     ) -> List[str]:
         """
         Find the best base branch for the current HEAD by listing candidate remote branches
         Return the branch(es) with the shortest distance from HEAD to fork-point
         """
-        branches = await self.find_remote_branches(limit_to_base_branches, True)
+        branches = await self.find_remote_branches(commit, limit_to_base_branches, True)
         candidates: List[Tuple[int, str]] = []
 
         if len(branches) == 1:
             return branches
 
         for b in branches:
+            if not allow_self and b == commit:
+                continue
+
             # If we have valid candidates, we can stop iterating once the distance is greater
             # than the current best distance.
             dist = await self.distance_to_fork_point(
@@ -468,12 +471,19 @@ class Git:
                 candidates.append((dist, b))
         return [c[1] for c in candidates]
 
-    async def get_best_base_branch(self, commit: str, limit_to_base_branches: bool = True) -> str:
+    async def get_best_base_branch(
+        self,
+        commit: str,
+        limit_to_base_branches: bool = True,
+        allow_self: bool = True,
+    ) -> str:
         """
         If the current branch or main is among the best branches, choose that.
         Otherwise choose the last lexographically.
         """
-        candidates = await self.get_best_base_branch_candidates(commit, limit_to_base_branches)
+        candidates = await self.get_best_base_branch_candidates(
+            commit, limit_to_base_branches, allow_self
+        )
         ret = candidates[0]
         if len(candidates) == 1:
             return ret
