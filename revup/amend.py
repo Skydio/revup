@@ -51,7 +51,7 @@ async def get_topic_summary(topics: topic_stack.TopicStack) -> str:
     if len(topics.topics) == 0:
         return ""
 
-    topic_lines = "".join([f"  {topic}\n" for topic in topics.topics.keys()])
+    topic_lines = "".join([f"  {topic}\n" for topic in reversed(topics.topics.keys())])
     return f"\nTopics found between HEAD and {topics.relative_branch}:\n{topic_lines}"
 
 
