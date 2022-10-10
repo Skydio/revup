@@ -3,6 +3,7 @@ import copy
 import logging
 import os
 import re
+import shutil
 import tempfile
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Pattern, Tuple
@@ -131,8 +132,11 @@ def is_commit_hash(commit_ish: GitCommitHash) -> bool:
     return re.match(RE_COMMIT_HASH, commit_ish) is not None
 
 
-async def get_default_git(sh: shell.Shell) -> str:
-    return (await sh.sh("/usr/bin/which", "git"))[1].strip()
+def get_default_git() -> str:
+    ret = shutil.which("git")
+    if not ret:
+        raise RevupUsageException("Could not find a 'git' binary on the current PATH.")
+    return ret
 
 
 async def make_git(
@@ -146,7 +150,7 @@ async def make_git(
     editor: str = "",
 ) -> "Git":
     if not git_path:
-        git_path = await get_default_git(sh)
+        git_path = get_default_git()
 
     git_ctx = Git(sh, git_path, remote_name, main_branch, base_branch_globs, keep_temp)
 
