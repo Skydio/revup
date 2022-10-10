@@ -8,6 +8,7 @@ import stat
 import subprocess
 import sys
 from argparse import _StoreAction, _StoreFalseAction, _StoreTrueAction
+from builtins import FileNotFoundError
 from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator, Tuple
 
@@ -26,8 +27,12 @@ class HelpAction(argparse.Action):
     def __call__(self, parser: Any, namespace: Any, values: Any, option_string: Any = None) -> None:
         source_dir = os.path.dirname(os.path.abspath(__file__))
         man_cmd = ("man", "-M", source_dir, parser.prog.split()[-1])
-        if subprocess.call(man_cmd) != 0:
-            print("Couldn't format man page, is 'man' available?")
+        try:
+            if subprocess.call(man_cmd) != 0:
+                print("Error in showing man page")
+                print(parser.format_help())
+        except FileNotFoundError:
+            print("'man' binary not found.")
             print(parser.format_help())
         sys.exit(0)
 
@@ -122,9 +127,7 @@ async def get_config() -> config.Config:
     # There's a chicken/egg problem in getting git path from config when we need git
     # to find the path of the config file. Just this once, we use the default.
     sh = shell.Shell()
-    repo_root = (await sh.sh(await git.get_default_git(sh), "rev-parse", "--show-toplevel"))[
-        1
-    ].rstrip()
+    repo_root = (await sh.sh(git.get_default_git(), "rev-parse", "--show-toplevel"))[1].rstrip()
     conf = config.Config(config_path, os.path.join(repo_root, config_file_name))
     conf.read()
     return conf
