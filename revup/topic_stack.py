@@ -326,12 +326,13 @@ class TopicStack:
             diff = "rebase"
             summary = "0 files changed"
 
+        d = datetime.now()
         ret += (
             f"\r\n| {number} | [{review.new_commits[-1][:8]}]"
             f"(/{self.fork_info.owner}/{self.repo_info.name}/commit/{review.new_commits[-1]}) "
             f"| [{review.base_ref[:8]}]"
             f"(/{self.fork_info.owner}/{self.repo_info.name}/commit/{review.base_ref}) "
-            f"| {diff} | {datetime.today().strftime('%b %d %-I:%M %p')} | {summary} |"
+            f"| {diff} | {d:%b} {d.day} {d.hour}:{d.minute:02} {d:%p} | {summary} |"
         )
         return PrComment(ret, orig.id if orig else None)
 
