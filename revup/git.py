@@ -588,7 +588,7 @@ class Git:
         git_env = {
             "GIT_INDEX_FILE": temp_index_path,
         }
-        await self.sh.sh("cp", f"{self.git_dir}/index", temp_index_path)
+        shutil.copy(f"{self.git_dir}/index", temp_index_path)
         await self.git("reset", "-q", "--no-refresh", parent_tree, "--", ":/", env=git_env)
         success = not (
             await self.sh.piped_sh(
@@ -704,7 +704,7 @@ class Git:
         git_env = {
             "GIT_INDEX_FILE": temp_index_path,
         }
-        await self.sh.sh("cp", f"{self.git_dir}/index", temp_index_path)
+        shutil.copy(f"{self.git_dir}/index", temp_index_path)
         await self.git("reset", "-q", "--no-refresh", new_base, "--", ":/", env=git_env)
         await self.git(
             "update-index",
