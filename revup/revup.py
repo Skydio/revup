@@ -115,7 +115,7 @@ async def get_config() -> config.Config:
         os.path.expanduser(REVUP_CONFIG_ENV_VAR), os.path.join(home_path, config_file_name)
     )
 
-    if os.path.isfile(config_path):
+    if os.path.isfile(config_path) and hasattr(os, "getuid"):
         config_stat = os.stat(config_path)
         if config_stat.st_uid != os.getuid():
             raise RevupUsageException("Config file is not owned by the current user!")
