@@ -22,7 +22,7 @@ async def get_github_repo_info(
     """
     remote_url = (await git_ctx.git("remote", "get-url", remote_name))[1]
     while True:
-        match = rf"^git@{github_url}:([^/]+)/([^.]+)(?:\.git)?$"
+        match = rf"^[^@]+@{github_url}:([^/]+)/([^.]+)(?:\.git)?$"
         m = re.match(match, remote_url)
         if m:
             owner = m.group(1)
