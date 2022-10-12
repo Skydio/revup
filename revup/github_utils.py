@@ -236,6 +236,10 @@ async def query_everything(
                                 login
                                 id
                             }}
+                            ... on Team {{
+                                name
+                                id
+                            }}
                         }}
                     }}
                 }}
@@ -298,8 +302,11 @@ async def query_everything(
                 pr_labels.add(label["name"])
                 pr_label_ids.add(label["id"])
             for revs in this_node["reviewRequests"]["nodes"]:
-                reviewers.add(revs["requestedReviewer"]["login"])
-                reviewer_ids.add(revs["requestedReviewer"]["id"])
+                if not revs["requestedReviewer"]:
+                    continue
+                elif "login" in revs["requestedReviewer"]:
+                    reviewers.add(revs["requestedReviewer"]["login"])
+                    reviewer_ids.add(revs["requestedReviewer"]["id"])
             for revs in this_node["latestReviews"]["nodes"]:
                 if not revs["viewerDidAuthor"]:
                     reviewers.add(revs["author"]["login"])
