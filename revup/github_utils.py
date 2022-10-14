@@ -236,10 +236,6 @@ async def query_everything(
                                 login
                                 id
                             }}
-                            ... on Team {{
-                                name
-                                id
-                            }}
                         }}
                     }}
                 }}
