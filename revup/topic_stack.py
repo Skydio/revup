@@ -303,6 +303,8 @@ class TopicStack:
                 diff_base = review.base_ref
             elif review.base_ref != review.pr_info.baseRefOid:
                 # Rebased review, make a virtual diff target
+                if self.last_virtual_diff_target is None:
+                    self.last_virtual_diff_target = GitCommitHash(self.base_branch)
                 self.last_virtual_diff_target = await self.git_ctx.make_virtual_diff_target(
                     review.pr_info.baseRefOid,
                     review.pr_info.headRefOid,
