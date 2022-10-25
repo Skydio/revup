@@ -3,43 +3,11 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple
 
-from revup import git, github
+from revup import github
+from revup.git import GitHubRepoInfo
 from revup.types import GitCommitHash
 
-GitHubRepoInfo = NamedTuple(
-    "GitHubRepoInfo",
-    [("name", str), ("owner", str)],
-)
-
 MAX_COMMENTS_TO_QUERY = 3
-
-
-async def get_github_repo_info(
-    *, git_ctx: git.Git, github_url: str, remote_name: str
-) -> GitHubRepoInfo:
-    """
-    Return github repo's name and owner.
-    """
-    remote_url = (await git_ctx.git("remote", "get-url", remote_name))[1]
-    while True:
-        match = rf"^[^@]+@{github_url}:([^/]+)/([^.]+)(?:\.git)?$"
-        m = re.match(match, remote_url)
-        if m:
-            owner = m.group(1)
-            name = m.group(2)
-            break
-        search = rf"{github_url}/([^/]+)/([^.]+)"
-        m = re.search(search, remote_url)
-        if m:
-            owner = m.group(1)
-            name = m.group(2)
-            break
-        owner = ""
-        name = ""
-        break
-
-    info = GitHubRepoInfo(owner=owner, name=name)
-    return info
 
 
 @dataclass

@@ -160,10 +160,10 @@ def dump_args(args: argparse.Namespace) -> None:
 async def github_connection(
     git_ctx: git.Git, args: argparse.Namespace, conf: config.Config
 ) -> AsyncGenerator[Tuple, None]:
-    from revup import github_real, github_utils
+    from revup import github_real
 
-    repo_info = await github_utils.get_github_repo_info(
-        git_ctx=git_ctx, github_url=args.github_url, remote_name=args.remote_name
+    repo_info = await git_ctx.get_github_repo_info(
+        github_url=args.github_url, remote_name=args.remote_name
     )
 
     if not repo_info.owner or not repo_info.name:
@@ -177,8 +177,8 @@ async def github_connection(
 
     fork_info = repo_info
     if args.fork_name and args.fork_name != args.remote_name:
-        fork_info = await github_utils.get_github_repo_info(
-            git_ctx=git_ctx, github_url=args.github_url, remote_name=args.fork_name
+        fork_info = await git_ctx.get_github_repo_info(
+            github_url=args.github_url, remote_name=args.fork_name
         )
 
     if not fork_info.owner or not fork_info.name:
@@ -338,6 +338,14 @@ async def main() -> int:
 
         # "commit" is an alias of "amend --insert"
         args.insert = args.cmd == "commit" or args.insert
+
+        repo_info = await git_ctx.get_github_repo_info(
+            github_url=args.github_url, remote_name=args.remote_name
+        )
+
+        if not repo_info.owner or not repo_info.name:
+            # Don't try to get topics for repos that are not in use with github
+            args.parse_topics = False
 
         return await amend.main(args=args, git_ctx=git_ctx)
 
