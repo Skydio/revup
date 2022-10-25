@@ -6,7 +6,7 @@ import re
 import shutil
 import tempfile
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Pattern, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Pattern, Tuple
 
 from revup import shell
 from revup.types import (
@@ -50,6 +50,12 @@ GIT_DIFF_ARGS = [
 ]
 
 COMMON_MAIN_BRANCHES = ["main", "master"]  # Below logic assumes 2 values here
+
+
+GitHubRepoInfo = NamedTuple(
+    "GitHubRepoInfo",
+    [("name", str), ("owner", str)],
+)
 
 
 @dataclass
@@ -283,6 +289,35 @@ class Git:
 
     async def git_stdout(self, *args: str, **kwargs: Any) -> str:
         return (await self.git(*args, **kwargs))[1]
+
+    async def get_github_repo_info(self, github_url: str, remote_name: str) -> GitHubRepoInfo:
+        """
+        Return github repo's name and owner.
+        """
+        owner = ""
+        name = ""
+        ret = await self.git("remote", "get-url", remote_name, raiseonerror=False)
+        if ret[0] != 0:
+            return GitHubRepoInfo(owner=owner, name=name)
+        remote_url = ret[1]
+        while True:
+            match = rf"^[^@]+@{github_url}:([^/]+)/([^.]+)(?:\.git)?$"
+            m = re.match(match, remote_url)
+            if m:
+                owner = m.group(1)
+                name = m.group(2)
+                break
+            search = rf"{github_url}/([^/]+)/([^.]+)"
+            m = re.search(search, remote_url)
+            if m:
+                owner = m.group(1)
+                name = m.group(2)
+                break
+
+            break
+
+        info = GitHubRepoInfo(owner=owner, name=name)
+        return info
 
     async def rev_list(
         self,
