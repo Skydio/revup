@@ -6,7 +6,7 @@ from typing import Any, Optional, Tuple, Union
 from aiohttp import ClientSession
 
 from revup import github
-from revup.types import RevupGithubException
+from revup.types import RevupGithubException, RevupRequestException
 
 
 class RealGitHubEndpoint(github.GitHubEndpoint):
@@ -85,5 +85,8 @@ class RealGitHubEndpoint(github.GitHubEndpoint):
 
             if "errors" in r:
                 raise RevupGithubException(r["errors"])
+
+            if resp.status != 200:
+                raise RevupRequestException(resp.status, r)
 
         return r

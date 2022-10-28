@@ -6,6 +6,7 @@ from revup.revup import main
 from revup.types import (
     RevupConflictException,
     RevupGithubException,
+    RevupRequestException,
     RevupShellException,
     RevupUsageException,
 )
@@ -30,6 +31,10 @@ def _main() -> None:
 
         logging.warning("{} operations failed!".format(len(e.error_json)))
         sys.exit(5)
+    except RevupRequestException as e:
+        logging.error(f"Request failed with response status {e.status}")
+        logging.error(f"Response: {e.response}")
+        sys.exit(6)
 
 
 if __name__ == "__main__":
