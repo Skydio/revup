@@ -32,3 +32,10 @@ class RevupGithubException(Exception):
     def __init__(self, error_json: Dict):
         super().__init__()
         self.error_json = error_json
+
+
+class RevupRequestException(Exception):
+    def __init__(self, status: int, response: Dict):
+        super().__init__()
+        self.status = status
+        self.response = response
