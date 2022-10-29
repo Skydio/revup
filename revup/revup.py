@@ -17,6 +17,7 @@ from revup import config, git, logs, shell
 from revup.types import RevupUsageException
 
 REVUP_CONFIG_ENV_VAR = "REVUP_CONFIG_PATH"
+CONFIG_FILE_NAME = ".revupconfig"
 
 
 class HelpAction(argparse.Action):
@@ -73,13 +74,13 @@ class RevupArgParser(argparse.ArgumentParser):
                 option = action.option_strings[0][2:].replace("-", "_")
                 if isinstance(action, _StoreTrueAction):
                     if conf.has_option(cmd, option):
-                        override = conf.get(cmd, option)
-                        if override in ("True", "False"):
-                            action.default = override == "True"
+                        override = conf.get(cmd, option).lower()
+                        if override in ("true", "false"):
+                            action.default = override == "true"
                         else:
                             raise ValueError(
                                 f'"{override}" not a valid override for boolean flag {option}, must'
-                                ' be "True" or "False"'
+                                ' be "true" or "false"'
                             )
                 elif isinstance(action, _StoreAction):
                     if conf.has_option(cmd, option):
@@ -108,13 +109,15 @@ def make_toplevel_parser() -> RevupArgParser:
     return revup_parser
 
 
-async def get_config() -> config.Config:
+def get_config_path() -> str:
     home_path = os.path.expanduser("~")
-    config_file_name = ".revupconfig"
-    config_path = os.environ.get(
-        os.path.expanduser(REVUP_CONFIG_ENV_VAR), os.path.join(home_path, config_file_name)
+    return os.environ.get(
+        os.path.expanduser(REVUP_CONFIG_ENV_VAR), os.path.join(home_path, CONFIG_FILE_NAME)
     )
 
+
+async def get_config() -> config.Config:
+    config_path = get_config_path()
     if os.path.isfile(config_path) and hasattr(os, "getuid"):
         config_stat = os.stat(config_path)
         if config_stat.st_uid != os.getuid():
@@ -128,7 +131,7 @@ async def get_config() -> config.Config:
     # to find the path of the config file. Just this once, we use the default.
     sh = shell.Shell()
     repo_root = (await sh.sh(git.get_default_git(), "rev-parse", "--show-toplevel"))[1].rstrip()
-    conf = config.Config(config_path, os.path.join(repo_root, config_file_name))
+    conf = config.Config(config_path, os.path.join(repo_root, CONFIG_FILE_NAME))
     conf.read()
     return conf
 
@@ -167,12 +170,12 @@ async def github_connection(
     )
 
     if not repo_info.owner or not repo_info.name:
-        raise RuntimeError(
-            f'Configured remote "{args.remote_name}" does not\n'
-            "point to the a github repository!\n"
-            "You can set it manually by running\n"
-            f"git remote set-url {args.remote_name} git@github.com:{{OWNER}}/{{PROJECT}}\n"
-            f"or change the configured remote in {conf.config_path}\n"
+        raise RevupUsageException(
+            f'Configured remote "{args.remote_name}" does not '
+            "point to the a github repository! "
+            "You can set it manually by running "
+            f"`git remote set-url {args.remote_name} git@github.com:{{OWNER}}/{{PROJECT}}` "
+            f"or change the configured remote in {conf.config_path}/"
         )
 
     fork_info = repo_info
@@ -182,18 +185,26 @@ async def github_connection(
         )
 
     if not fork_info.owner or not fork_info.name:
-        raise RuntimeError(
-            f'Configured remote fork "{args.fork_info}" does not\n'
-            "point to the a github repository!\n"
-            "You can set it manually by running\n"
-            f"git remote set-url {args.fork_info} git@github.com:{{OWNER}}/{{PROJECT}}\n"
-            f"or change the configured remote in {conf.config_path}\n"
+        raise RevupUsageException(
+            f'Configured remote fork "{args.fork_info}" does not '
+            "point to the a github repository! "
+            "You can set it manually by running "
+            f"`git remote set-url {args.fork_info} git@github.com:{{OWNER}}/{{PROJECT}}` "
+            f"or change the configured remote in {conf.config_path}."
         )
 
     if repo_info.name != fork_info.name:
-        raise RuntimeError(
-            f'Configured remote fork "{args.fork_info}" is not\n'
-            f"the same repo as the remote {args.remote_info}\n"
+        raise RevupUsageException(
+            f'Configured remote fork "{args.fork_info}" is not '
+            f"the same repo as the remote {args.remote_info}."
+        )
+
+    if not args.github_oauth:
+        raise RevupUsageException(
+            "No Github OAuth token configured! "
+            "Make one at https://github.com/settings/tokens/new "
+            "(revup needs full repo permissions) "
+            "then set it with `revup config github_oauth`."
         )
 
     github_ep = github_real.RealGitHubEndpoint(
@@ -221,6 +232,10 @@ async def main() -> int:
         add_help=False,
     )
     amend_parser = subparsers.add_parser("amend", aliases=["commit"], add_help=False)
+    config_parser = subparsers.add_parser(
+        "config",
+        add_help=False,
+    )
 
     for p in [upload_parser, restack_parser, amend_parser]:
         # Some args are used by both upload and restack
@@ -264,6 +279,11 @@ async def main() -> int:
     cherry_pick_parser.add_argument("--help", "-h", action=HelpAction, nargs=0)
     cherry_pick_parser.add_argument("branch", nargs=1)
     cherry_pick_parser.add_argument("--base-branch", "-b")
+
+    config_parser.add_argument("--help", "-h", action=HelpAction, nargs=0)
+    config_parser.add_argument("flag", nargs=1)
+    config_parser.add_argument("value", nargs="?")
+    config_parser.add_argument("--repo", "-r", action="store_true")
 
     toolkit_parser = subparsers.add_parser(
         "toolkit", description="Test various subfunctionalities."
@@ -318,8 +338,14 @@ async def main() -> int:
     args = revup_parser.parse_args()
 
     # So users don't accidentally leak their oauth when sharing logs
-    logs.configure_logger(debug=args.verbose, redactions={args.github_oauth: "<GITHUB_OAUTH>"})
+    logs.configure_logger(
+        debug=args.verbose,
+        redactions={args.github_oauth: "<GITHUB_OAUTH>"} if args.github_oauth else {},
+    )
     dump_args(args)
+
+    if args.cmd == "config":
+        return config.config_main(conf, args)
 
     git_ctx = await get_git(args)
 
