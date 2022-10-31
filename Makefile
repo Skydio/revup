@@ -1,6 +1,6 @@
 BUILD_DIR=build
 
-PYTHON ?= /usr/bin/env python3.8
+PYTHON ?= /usr/bin/env python3
 
 all: deps lint man package install
 
