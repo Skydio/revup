@@ -27,7 +27,8 @@ def _main() -> None:
         sys.exit(4)
     except RevupGithubException as e:
         for error in e.error_json:
-            logging.error("{}: {}".format(error["type"], error["message"]))
+            error_type = error["type"] if "type" in error else "Unknown Error"
+            logging.error("{}: {}".format(error_type, error["message"]))
 
         logging.warning("{} operations failed!".format(len(e.error_json)))
         sys.exit(5)
