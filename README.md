@@ -158,7 +158,7 @@ We recommend adding the above to `.gitconfig` to make pulling and rebasing easie
 
 # More features
 
-This is a non-exhausive intro to some more handy revup features.
+This is a non-exhaustive intro to some more handy revup features.
 
 For a full description of features, see the [docs](https://github.com/Skydio/revup/tree/main/docs) or run `revup -h` or `revup upload -h` to view docs in `man` format.
 
