@@ -735,6 +735,10 @@ class Git:
         ):
             new_index.append(f"{m.group('new_mode')} {m.group('new_hash')} 0\t{m.group('path')}")
 
+        if not new_index:
+            # No files were actually changed, so no diff needs to be applied to new_base
+            return new_base
+
         temp_index_path = self.get_scratch_dir() + "/index.temp"
         git_env = {
             "GIT_INDEX_FILE": temp_index_path,
