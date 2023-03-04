@@ -39,9 +39,9 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
         )
 
         if not args.old_base:
-            args.old_base = git_ctx.to_commit_hash(args.old_head + "~")
+            args.old_base = await git_ctx.to_commit_hash(args.old_head + "~")
         if not args.new_base:
-            args.new_base = git_ctx.to_commit_hash(args.new_head + "~")
+            args.new_base = await git_ctx.to_commit_hash(args.new_head + "~")
         logging.info(
             await git_ctx.make_virtual_diff_target(
                 args.old_base, args.old_head, args.new_base, args.new_head, args.parent
