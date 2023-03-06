@@ -412,7 +412,7 @@ class TopicStack:
         self,
         uploader: str,
         force_relative_chain: bool = False,
-        labels: str = None,
+        labels: Optional[str] = None,
         user_aliases: str = "",
         auto_add_users: str = "",
         self_authored_only: bool = False,
@@ -830,9 +830,11 @@ class TopicStack:
                         parent_info = (
                             "the same topic"
                             if next_parent != review.base_ref
-                            else f'relative topic "{topic.relative_topic.name}"'
-                            if topic.relative_topic
-                            else f'base branch "{base_branch}"'
+                            else (
+                                f'relative topic "{topic.relative_topic.name}"'
+                                if topic.relative_topic
+                                else f'base branch "{base_branch}"'
+                            )
                         )
                         raise RevupConflictException(
                             "Failed to cherry-pick commit:\n"
@@ -1142,9 +1144,11 @@ class TopicStack:
                 continue
             patchsets_comment = await self.create_patchsets_comment(
                 review,
-                review.pr_info.comments[review.patchsets_index]
-                if len(review.pr_info.comments) > review.patchsets_index
-                else None,
+                (
+                    review.pr_info.comments[review.patchsets_index]
+                    if len(review.pr_info.comments) > review.patchsets_index
+                    else None
+                ),
             )
             if patchsets_comment:
                 review.pr_update.comments.append(patchsets_comment)
