@@ -322,7 +322,7 @@ class Git:
     async def rev_list(
         self,
         include: str,
-        exclude: str = None,
+        exclude: Optional[str] = None,
         first_parent: bool = False,
         exclude_first_parent: bool = False,
         header: bool = False,

@@ -169,13 +169,17 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
             git_ctx.editor,
             await get_topic_summary(topics) if args.parse_topics else "",
             stack[0].commit_msg,
-            await git_ctx.git_stdout("--no-pager", "diff", "--cached", "--stat", "--no-color")
-            if has_diff
-            else "",
-            ""
-            if args.insert
-            else await git_ctx.git_stdout(
-                "--no-pager", "diff", commit + "~", commit, "--stat", "--no-color"
+            (
+                await git_ctx.git_stdout("--no-pager", "diff", "--cached", "--stat", "--no-color")
+                if has_diff
+                else ""
+            ),
+            (
+                ""
+                if args.insert
+                else await git_ctx.git_stdout(
+                    "--no-pager", "diff", commit + "~", commit, "--stat", "--no-color"
+                )
             ),
         )
         if len(new_msg.strip()) == 0:
