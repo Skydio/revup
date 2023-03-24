@@ -228,6 +228,7 @@ async def main() -> int:
         p.add_argument("--base-branch", "-b")
         p.add_argument("--relative-branch", "-e")
 
+    upload_parser.add_argument("topics", nargs="*")
     upload_parser.add_argument("--rebase", "-r", action="store_true")
     upload_parser.add_argument("--skip-confirm", "-s", action="store_true")
     upload_parser.add_argument("--dry-run", "-d", action="store_true")

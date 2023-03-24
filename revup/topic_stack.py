@@ -416,6 +416,7 @@ class TopicStack:
         user_aliases: str = "",
         auto_add_users: str = "",
         self_authored_only: bool = False,
+        limit_topics: Optional[List[str]] = None,
     ) -> None:
         """
         Populate reviews for already-parsed topics. Verify base branch and relative topic info to
@@ -423,7 +424,13 @@ class TopicStack:
         """
         seen_topics: Dict[str, Topic] = {}
         for name, topic in list(self.topics.items()):
-            relative_topic = ""
+            if limit_topics:
+                if name not in limit_topics:
+                    # If an explicit list was specified, don't upload other topics
+                    continue
+                # Disable the self authored check if this topic was explicitly given
+                self_authored_only = False
+                limit_topics.remove(name)
 
             if self_authored_only:
                 # Don't upload if this topic doesn't have commits authored by the current user
@@ -443,6 +450,7 @@ class TopicStack:
             if len(topic.tags[TAG_UPLOADER]) > 1:
                 raise RevupUsageException(f"Can't specify more than one uploader for topic {name}!")
 
+            relative_topic = ""
             if force_relative_chain and seen_topics:
                 relative_topic = list(seen_topics)[-1]
             elif len(topic.tags[TAG_RELATIVE]) > 1:
@@ -608,6 +616,10 @@ class TopicStack:
                 topic.tags[TAG_REVIEWER].update(topic.tags[TAG_ASSIGNEE])
 
             seen_topics[name] = topic
+
+        if limit_topics:
+            for name in limit_topics:
+                logging.warning(f"Couldn't find any topic named {name}")
 
     async def mark_rebases(self, skip_rebase: bool) -> None:
         """
