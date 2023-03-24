@@ -9,7 +9,7 @@ revup upload - Modify or create code reviews.
 `[--rebase] [--relative-chain] [--skip-confirm] [--dry-run]`
 `[--status] [--no-cherry-pick] [--no-update-pr-body] [--review-graph]`
 `[--trim-tags] [--create-local-branches] [--patchsets] [--auto-add-users=<o>]`
-`[--labels=<labels>]`
+`[--labels=<labels>] [<topics>]`
 
 # DESCRIPTION
 
@@ -95,6 +95,11 @@ any changes. In this case a user should specify relative topics such
 that conflicts will not happen.
 
 # OPTIONS
+
+**`<topics>`**
+: Optionally specify any number of topic names to upload. If none are
+specified, all topics are uploaded. If topics are specified they will
+be uploaded regardless of author.
 
 **--help, -h**
 : Show this help page.

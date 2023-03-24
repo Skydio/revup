@@ -39,6 +39,7 @@ async def main(
             user_aliases=args.user_aliases,
             auto_add_users=args.auto_add_users,
             self_authored_only=args.self_authored_only,
+            limit_topics=args.topics,
         )
 
     if not args.dry_run:
