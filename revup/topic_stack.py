@@ -934,6 +934,8 @@ class TopicStack:
         """
         Query pr and reviewer/label info from github
         """
+        if not self.topics:
+            return
         if not self.github_ep or not self.repo_info:
             raise RuntimeError("Can't query without github info")
 
@@ -988,12 +990,9 @@ class TopicStack:
         """
         Populate information necessary to do PR creation / update in github.
         """
-        if (
-            not self.repo_id
-            or self.names_to_ids is None
-            or self.names_to_logins is None
-            or self.labels_to_ids is None
-        ):
+        if not self.topics:
+            return
+        if self.names_to_ids is None or self.names_to_logins is None or self.labels_to_ids is None:
             raise RuntimeError("Need to query before updating")
 
         for topic in self.topics.values():
@@ -1157,6 +1156,8 @@ class TopicStack:
         """
         Actually perform the github graphql PR creation
         """
+        if not self.topics:
+            return
         if not self.github_ep or not self.repo_info or not self.fork_info or not self.repo_id:
             raise RuntimeError("Can't update without github info")
 
@@ -1176,6 +1177,8 @@ class TopicStack:
         """
         Actually perform the github graphql PR updates
         """
+        if not self.topics:
+            return
         if not self.github_ep or not self.repo_info or not self.fork_info or not self.repo_id:
             raise RuntimeError("Can't update without github info")
 
