@@ -590,7 +590,7 @@ class Git:
         ret = (
             await self.sh.piped_sh(
                 patch_source,
-                [self.git_path, "patch-id", "--stable"],
+                [self.git_path, "patch-id", "--verbatim"],
             )
         )[1].split()
         # If the diff is empty, patch id will return nothing. We just use that as the patch-id since
