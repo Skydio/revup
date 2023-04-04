@@ -484,8 +484,8 @@ class Git:
         self, commit: str, limit_to_base_branches: bool = True, allow_self: bool = True
     ) -> List[str]:
         """
-        Find the best base branch for the current HEAD by listing candidate remote branches
-        Return the branch(es) with the shortest distance from HEAD to fork-point
+        Find the best base branch for the given commit by listing candidate remote branches
+        Return the branch(es) with the shortest distance from the commit to fork-point
         """
         branches = await self.find_remote_branches(commit, limit_to_base_branches, True)
         candidates: List[Tuple[int, str]] = []
