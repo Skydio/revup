@@ -181,7 +181,7 @@ async def make_git(
         git_ctx.git_stdout("--version"),
         get_email(),
         get_editor(),
-        git_ctx.commit_exists(main_branch),
+        git_ctx.commit_exists(f"{remote_name}/{main_branch}"),
     )
 
     if git_version:
