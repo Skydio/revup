@@ -22,6 +22,12 @@ from revup.types import (
     RevupUsageException,
 )
 
+# Since topic name is incorporated into the branch name, we must ensure that it matches
+# the character set that github supports. It's possible to have other characters if they're
+# properly escaped but we don't want to deal with that for now.
+# https://docs.github.com/en/get-started/using-git/dealing-with-special-characters-in-branch-and-tag-names
+RE_BRANCH_ALLOWED = re.compile(r"^[\w\d_\.\/-]+$")
+
 
 def format_remote_branch(uploader: str, base_branch: str, topic: str) -> str:
     """
@@ -408,6 +414,8 @@ class TopicStack:
                 if trim_tags:
                     c.commit_msg = trimmed_msg
                 name = min(parsed_tags[TAG_TOPIC])
+                if not RE_BRANCH_ALLOWED.match(name):
+                    raise RevupUsageException(f"Invalid characters in topic name '{name}'")
                 if name not in self.topics:
                     self.topics[name] = Topic(name)
                 self.topics[name].original_commits.append(c)
