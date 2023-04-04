@@ -54,6 +54,8 @@ VALID_TAGS = {
 
 RE_COMMIT_LABEL = re.compile(r"^(?P<label1>[a-zA-Z\-_0-9]+):.*|^\[(?P<label2>[a-zA-Z\-_0-9]+)\].*")
 
+RE_BRANCH_ALLOWED = re.compile(r"^[a-z\d_\.\/-]+$")
+
 PATCHSETS_FIRST_LINE = "| # | head | base | diff | date | summary |\r\n| - | - | - | - | - | - |"
 REVIEW_GRAPH_FIRST_LINE = "Reviews in this chain:\r\n"
 
@@ -402,6 +404,8 @@ class TopicStack:
                 if trim_tags:
                     c.commit_msg = trimmed_msg
                 name = min(parsed_tags[TAG_TOPIC])
+                if not RE_BRANCH_ALLOWED.match(name):
+                    raise RevupUsageException(f"Invalid characters in topic name '{name}'")
                 if name not in self.topics:
                     self.topics[name] = Topic(name)
                 self.topics[name].original_commits.append(c)
