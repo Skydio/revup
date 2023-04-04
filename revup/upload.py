@@ -26,6 +26,7 @@ async def main(
         github_ep,
         repo_info,
         fork_info,
+        args.head,
     )
     with get_console().status("Finding topics…"):
         await topics.populate_topics(

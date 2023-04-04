@@ -193,6 +193,9 @@ class TopicStack:
     repo_info: Optional[github_utils.GitHubRepoInfo] = None
     fork_info: Optional[github_utils.GitHubRepoInfo] = None
 
+    # Commit at the head of the branch to be uploaded
+    head: str = "HEAD"
+
     # Original list of relevant commits given to the submitter
     commits: List[git.CommitHeader] = field(default_factory=list)
 
@@ -348,12 +351,14 @@ class TopicStack:
         """
         if self.populated:
             return
+        if self.head != "HEAD":
+            await self.git_ctx.verify_branch_or_commit(self.head)
         if self.base_branch:
             self.base_branch = self.git_ctx.ensure_branch_prefix(self.base_branch)
             await self.git_ctx.verify_branch_or_commit(self.base_branch)
         else:
             # Base branch can be autodetected if not specified
-            self.base_branch = await self.git_ctx.get_best_base_branch("HEAD", True)
+            self.base_branch = await self.git_ctx.get_best_base_branch(self.head, True)
 
         if self.relative_branch:
             self.relative_branch = self.git_ctx.ensure_branch_prefix(self.relative_branch)
@@ -362,14 +367,14 @@ class TopicStack:
             # If relative branch is not specified, its just the base branch
             self.relative_branch = self.base_branch
 
-        branch_point = await self.git_ctx.fork_point("HEAD", self.relative_branch)
+        branch_point = await self.git_ctx.fork_point(self.head, self.relative_branch)
         if self.base_branch != self.relative_branch:
-            base_branch_point = await self.git_ctx.fork_point("HEAD", self.base_branch)
+            base_branch_point = await self.git_ctx.fork_point(self.head, self.base_branch)
             if not await self.git_ctx.is_ancestor(base_branch_point, branch_point):
-                # Our model expects relative branch to be forked off base branch, and HEAD
+                # Our model expects relative branch to be forked off base branch, and head
                 # to be forked off relative branch.
                 raise RevupUsageException(
-                    "Relative branch structure is invalid: HEAD is closer to"
+                    f"Relative branch structure is invalid: {self.head} is closer to"
                     f" {self.base_branch} than {self.relative_branch}."
                     f"Specifically we expect the fork point with {self.base_branch} "
                     f"({base_branch_point}) to be an ancestor of the fork point with "
@@ -377,7 +382,7 @@ class TopicStack:
                 )
 
         self.commits = git.parse_rev_list(
-            await self.git_ctx.rev_list("HEAD", branch_point, header=True, first_parent=True)
+            await self.git_ctx.rev_list(self.head, branch_point, header=True, first_parent=True)
         )
 
         # Parse tags and add each commit to appropriate topics

@@ -192,3 +192,6 @@ mappings are used to transform usernames specified in Reviewers/Assignees.
 **--auto-add-users**
 : If "no", do nothing extra. If "r2a", add users from the Reviewers tag as assignees.
 If "a2r", add users from the Assignees tag as reviewers. If "both", do both of the previous.
+
+**--head**
+: The name or commit of the branch to be uploaded. If not specified, defaults to HEAD.

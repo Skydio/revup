@@ -249,6 +249,7 @@ async def main() -> int:
     upload_parser.add_argument("--pre-upload", "-p")
     upload_parser.add_argument("--relative-chain", "-c", action="store_true")
     upload_parser.add_argument("--auto-topic", "-a", action="store_true")
+    upload_parser.add_argument("--head", default="HEAD")
 
     restack_parser.add_argument("--topicless-last", "-t", action="store_true")
 
