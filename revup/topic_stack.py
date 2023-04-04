@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import subprocess
@@ -678,10 +679,9 @@ class TopicStack:
             else:
                 if not topic.patch_ids:
                     # Lazily load patch ids for the topic.
-                    # TODO async gather to generate patch ids in parallel
-                    topic.patch_ids = [
-                        await self.git_ctx.get_patch_id(c.commit_id) for c in topic.original_commits
-                    ]
+                    topic.patch_ids = await asyncio.gather(
+                        *(self.git_ctx.get_patch_id(c.commit_id) for c in topic.original_commits)
+                    )
 
                 review.remote_commits = git.parse_rev_list(
                     await self.git_ctx.rev_list(
@@ -692,10 +692,9 @@ class TopicStack:
                     )
                 )
 
-                # TODO async gather to generate patch ids in parallel
-                review.remote_patch_ids = [
-                    await self.git_ctx.get_patch_id(c.commit_id) for c in review.remote_commits
-                ]
+                review.remote_patch_ids = await asyncio.gather(
+                    *(self.git_ctx.get_patch_id(c.commit_id) for c in review.remote_commits)
+                )
 
                 # This review is a rebase iff all commit diffs match
                 is_rebase = len(review.remote_commits) == len(topic.original_commits) and all(
