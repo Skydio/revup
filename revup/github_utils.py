@@ -382,18 +382,13 @@ async def create_pull_requests(
 
     arg_str = ", ".join(get_args_declaration(inputs_args, "CreatePullRequestInput!"))
 
-    request_str = "".join(
-        len(inputs)
-        * [
-            """
+    request_str = "".join(len(inputs) * ["""
             {}: createPullRequest(input: ${}) {{
                 pullRequest {{
                     id
                     url
                 }}
-            }},"""
-        ]
-    )
+            }},"""])
     request_str = request_str.format(*zip_and_flatten(prs_out, inputs_args.keys()))
 
     mutation_str = f"""
@@ -531,93 +526,53 @@ async def update_pull_requests(github_ep: github.GitHubEndpoint, prs: List[PrUpd
         + get_args_declaration(edit_comments_args, "UpdateIssueCommentInput!")
     )
 
-    update_str = "".join(
-        len(inputs)
-        * [
-            """
+    update_str = "".join(len(inputs) * ["""
             {}: updatePullRequest(input: ${}) {{
                 clientMutationId
-            }},"""
-        ]
-    )
+            }},"""])
     update_str = update_str.format(*zip_and_flatten(prs_out, inputs_args.keys()))
 
-    request_reviewers_str = "".join(
-        len(reviewers_args)
-        * [
-            """
+    request_reviewers_str = "".join(len(reviewers_args) * ["""
             {}: requestReviews(input: ${}) {{
                 clientMutationId
-            }},"""
-        ]
-    )
+            }},"""])
     request_reviewers_str = request_reviewers_str.format(
         *zip_and_flatten(reviewers_out, reviewers_args.keys())
     )
-    assignees_str = "".join(
-        len(assignees_args)
-        * [
-            """
+    assignees_str = "".join(len(assignees_args) * ["""
             {}: addAssigneesToAssignable(input: ${}) {{
                 clientMutationId
-            }},"""
-        ]
-    )
+            }},"""])
     assignees_str = assignees_str.format(*zip_and_flatten(assignees_out, assignees_args.keys()))
 
-    add_labels_str = "".join(
-        len(labels_args)
-        * [
-            """
+    add_labels_str = "".join(len(labels_args) * ["""
             {}: addLabelsToLabelable(input: ${}) {{
                 clientMutationId
-            }},"""
-        ]
-    )
+            }},"""])
     add_labels_str = add_labels_str.format(*zip_and_flatten(labels_out, labels_args.keys()))
 
-    to_draft_str = "".join(
-        len(convert_to_draft)
-        * [
-            """
+    to_draft_str = "".join(len(convert_to_draft) * ["""
             {}: convertPullRequestToDraft(input: ${}) {{
                 clientMutationId
-            }},"""
-        ]
-    )
+            }},"""])
     to_draft_str = to_draft_str.format(*zip_and_flatten(to_draft_out, to_draft_args.keys()))
 
-    from_draft_str = "".join(
-        len(convert_from_draft)
-        * [
-            """
+    from_draft_str = "".join(len(convert_from_draft) * ["""
             {}: markPullRequestReadyForReview(input: ${}) {{
                 clientMutationId
-            }},"""
-        ]
-    )
+            }},"""])
     from_draft_str = from_draft_str.format(*zip_and_flatten(from_draft_out, from_draft_args.keys()))
 
-    add_comments_str = "".join(
-        len(comments_args)
-        * [
-            """
+    add_comments_str = "".join(len(comments_args) * ["""
             {}: addComment(input: ${}) {{
                 clientMutationId
-            }},"""
-        ]
-    )
+            }},"""])
     add_comments_str = add_comments_str.format(*zip_and_flatten(comments_out, comments_args.keys()))
 
-    edit_comments_str = "".join(
-        len(edit_comments_args)
-        * [
-            """
+    edit_comments_str = "".join(len(edit_comments_args) * ["""
             {}: updateIssueComment(input: ${}) {{
                 clientMutationId
-            }},"""
-        ]
-    )
+            }},"""])
     edit_comments_str = edit_comments_str.format(
         *zip_and_flatten(edit_comments_out, edit_comments_args.keys())
     )
