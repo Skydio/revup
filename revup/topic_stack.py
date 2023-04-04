@@ -719,15 +719,23 @@ class TopicStack:
                         pass
 
             if review.is_pure_rebase and review.pr_info is not None:
-                # For a relative series of reviews, revup will only ever upload them directly
-                # on top of each other. If this relationship is ever broken, we always reupload
-                # This ensures predictable and consistent CI behavior between the branches.
-                is_on_top_of_relative = (
-                    topic.relative_topic is None
-                    or topic.relative_topic.reviews[base_branch].pr_info is None
-                    or review.remote_commits[0].parents[0]
-                    == topic.relative_topic.reviews[base_branch].remote_commits[-1].commit_id
-                )
+                if topic.relative_topic is None:
+                    if not review.base_ref:
+                        raise RuntimeError("Review doesn't have a base ref!")
+                    # For non-relative reviews, the base is correct if the remote base commit is a
+                    # first-parent ancestor of the local remote base.
+                    is_on_correct_base = await self.git_ctx.is_ancestor(
+                        review.remote_commits[0].parents[0], review.base_ref
+                    )
+                else:
+                    # For a relative series of reviews, revup will only ever upload them directly
+                    # on top of each other. If this relationship is ever broken, we always reupload
+                    # This ensures predictable and consistent CI behavior between the branches.
+                    is_on_correct_base = (
+                        topic.relative_topic.reviews[base_branch].pr_info is None
+                        or review.remote_commits[0].parents[0]
+                        == topic.relative_topic.reviews[base_branch].remote_commits[-1].commit_id
+                    )
 
                 relative_topic_is_nochange = (
                     topic.relative_topic is not None
@@ -737,15 +745,24 @@ class TopicStack:
                     topic.relative_topic is None
                     or topic.relative_topic.reviews[base_branch].push_status != PushStatus.PUSHED
                 )
+                logging.debug(
+                    "Review {}/{} is correct base {} relative nochange {} skippable {}".format(
+                        base_branch,
+                        topic.name,
+                        is_on_correct_base,
+                        relative_topic_is_nochange,
+                        relative_topic_is_skippable,
+                    )
+                )
 
                 if review.base_ref == review.remote_commits[0].parents[0] or (
-                    relative_topic_is_nochange and is_on_top_of_relative
+                    relative_topic_is_nochange and is_on_correct_base
                 ):
                     # This is a rebase and the parent is the same, so there must be no change.
                     # Alternatively, it is relative to a topic with no change.
                     review.push_status = PushStatus.NOCHANGE
                 elif review.status == PrStatus.MERGED or (
-                    skip_rebase and is_on_top_of_relative and relative_topic_is_skippable
+                    skip_rebase and is_on_correct_base and relative_topic_is_skippable
                 ):
                     # Never push merged changes.
                     # Also don't push if the user asked to skip pushing rebases, but only if the

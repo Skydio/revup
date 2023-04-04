@@ -413,6 +413,8 @@ class Git:
         This is different from merge-base --is-ancestor since that checks all
         parents, not just the first.
         """
+        if ref == ancestor:
+            return True
         return await self.distance_to_fork_point(ref, ancestor, 1) == 0
 
     async def have_identical_trees(self, ref1: GitCommitHash, ref2: GitCommitHash) -> bool:
