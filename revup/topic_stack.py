@@ -352,6 +352,7 @@ class TopicStack:
         self,
         auto_topic: bool = False,
         trim_tags: bool = False,
+        raise_on_invalid: bool = False,
     ) -> None:
         """
         Parse all commits and sort them into individual topics.
@@ -377,7 +378,9 @@ class TopicStack:
         branch_point = await self.git_ctx.fork_point(self.head, self.relative_branch)
         if self.base_branch != self.relative_branch:
             base_branch_point = await self.git_ctx.fork_point(self.head, self.base_branch)
-            if not await self.git_ctx.is_ancestor(base_branch_point, branch_point):
+            if raise_on_invalid and not await self.git_ctx.is_ancestor(
+                base_branch_point, branch_point
+            ):
                 # Our model expects relative branch to be forked off base branch, and head
                 # to be forked off relative branch.
                 raise RevupUsageException(
@@ -407,14 +410,15 @@ class TopicStack:
                     continue
 
             if len(parsed_tags[TAG_TOPIC]) > 1:
-                raise RevupUsageException(
-                    f"Can't specify more than one topic for a commit!\n\n{c.commit_msg}"
-                )
+                if raise_on_invalid:
+                    raise RevupUsageException(
+                        f"Can't specify more than one topic for a commit!\n\n{c.commit_msg}"
+                    )
             else:
                 if trim_tags:
                     c.commit_msg = trimmed_msg
                 name = min(parsed_tags[TAG_TOPIC])
-                if not RE_BRANCH_ALLOWED.match(name):
+                if raise_on_invalid and not RE_BRANCH_ALLOWED.match(name):
                     raise RevupUsageException(f"Invalid characters in topic name '{name}'")
                 if name not in self.topics:
                     self.topics[name] = Topic(name)

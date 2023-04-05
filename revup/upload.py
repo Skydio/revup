@@ -32,6 +32,7 @@ async def main(
         await topics.populate_topics(
             auto_topic=args.auto_topic,
             trim_tags=args.trim_tags,
+            raise_on_invalid=True,
         )
         await topics.populate_reviews(
             args.uploader if args.uploader else git_ctx.author,
