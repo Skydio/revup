@@ -881,11 +881,13 @@ class TopicStack:
                                 else f'base branch "{base_branch}"'
                             )
                         )
+                        await self.git_ctx.dump_conflict(exc)
                         raise RevupConflictException(
-                            "Failed to cherry-pick commit:\n"
-                            f'"{commit.title}" ({commit.commit_id[:8]}) in topic "{name}"\n'
-                            f"to new parent ({next_parent[:8]}) in {parent_info}\n\n"
-                            "You must specify relative branches to prevent this conflict!"
+                            commit,
+                            next_parent,
+                            "You must specify relative branches to prevent this conflict!",
+                            f' in topic "{name}"',
+                            f" in {parent_info}",
                         ) from exc
                     review.new_commits.append(next_parent)
 
@@ -1284,11 +1286,11 @@ class TopicStack:
                     commit, new_parent
                 )
             except GitConflictException as exc:
+                await self.git_ctx.dump_conflict(exc)
                 raise RevupConflictException(
-                    "Failed to cherry-pick commit:\n"
-                    f'"{commit.title}" ({commit.commit_id[:8]})\n'
-                    f"to new parent ({new_parent[:8]})\n\n"
-                    f"You may need to `git rebase -i {new_parent[:8]}` to resolve these conflicts!"
+                    commit,
+                    new_parent,
+                    "You may need to `git rebase -i` to resolve these conflicts!",
                 ) from exc
         git_env = {
             "GIT_REFLOG_ACTION": "reset --soft (revup restack)",

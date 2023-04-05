@@ -20,7 +20,7 @@ def _main() -> None:
         logging.error(str(e))
         sys.exit(2)
     except RevupConflictException as e:
-        logging.error(str(e))
+        logging.error(e.message)
         sys.exit(3)
     except RevupShellException as e:
         logging.error(str(e))

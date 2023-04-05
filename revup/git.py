@@ -5,13 +5,14 @@ import os
 import re
 import shutil
 import tempfile
-from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Dict, List, NamedTuple, Optional, Pattern, Tuple
 
 from revup import shell
 from revup.types import (
+    CommitHeader,
     GitCommitHash,
+    GitConflict,
     GitConflictException,
     GitTreeHash,
     RevupUsageException,
@@ -41,6 +42,8 @@ RE_RAW_DIFF_TREE_LINE = re.compile(
 
 RE_COMMIT_HASH = re.compile(r"^[0-9a-f]{8,}")
 
+HEAD_COMMIT = GitCommitHash("HEAD")
+
 GIT_DIFF_ARGS = [
     "--no-pager",
     "diff",
@@ -57,25 +60,6 @@ GitHubRepoInfo = NamedTuple(
     "GitHubRepoInfo",
     [("name", str), ("owner", str)],
 )
-
-
-@dataclass
-class CommitHeader:
-    """
-    Represents the information extracted from `git rev-list --header`
-    """
-
-    tree: GitTreeHash
-    parents: List[GitCommitHash]
-    author_name: str = ""
-    author_email: str = ""
-    author_date: str = ""
-    committer_name: str = ""
-    committer_email: str = ""
-    committer_date: str = ""
-    commit_msg: str = ""
-    title: str = ""
-    commit_id: GitCommitHash = GitCommitHash("")
 
 
 def parse_commit_header(raw_header: str) -> CommitHeader:
@@ -622,63 +606,108 @@ class Git:
         """
         return (await self.git_stdout("diff", "--shortstat", parent, commit)).rstrip()
 
-    async def synthetic_cherry_pick(
+    async def merge_tree_commit(
         self,
-        commit_info: CommitHeader,
-        parent_tree: GitTreeHash,
-        new_parent: GitCommitHash,
-        patch_source: List[str],
+        branch1: GitCommitHash,
+        branch2: GitCommitHash,
+        new_commit_info: CommitHeader,
+        merge_base: Optional[GitCommitHash] = None,
     ) -> GitCommitHash:
         """
-        Given a patch source command and a target tree, attempt to use the "synthetic" cherry-pick
-        scheme to create a commit with the given info and a first parent of new_parent. Any
-        other parents will be kept from commit_info. Returns the commit hash of the new commit.
+        Perform a combined git merge-tree and commit-tree, returning a git commit hash. Raises
+        GitConflictException if there are conflicts while merging the trees.
         """
-        temp_index_path = self.get_scratch_dir() + "/index.temp"
-        git_env = {
-            "GIT_INDEX_FILE": temp_index_path,
-        }
-        shutil.copy(f"{self.git_dir}/index", temp_index_path)
-        await self.git("reset", "-q", "--no-refresh", parent_tree, "--", ":/", env=git_env)
-        success = not (
-            await self.sh.piped_sh(
-                patch_source,
-                [self.git_path, "apply", "--cached", "--3way", "--quiet", "--allow-empty", "-"],
-                env2=git_env,
-                raiseonerror=False,
-            )
-        )[0]
-        if success:
-            new_commit_info = copy.deepcopy(commit_info)
-            new_commit_info.tree = GitTreeHash(await self.git_stdout("write-tree", env=git_env))
-            new_commit_info.parents[0] = new_parent
-            return await self.commit_tree(new_commit_info)
-        else:
-            conflicts = await self.ls_files(show_conflicts=True, env=git_env)
-            if not conflicts:
-                logging.info("Add / delete conflicts found!")
-                logging.info("Listing conflicting paths isn't implemented for these yet.")
-            for _, stage, path in conflicts:
-                if stage == 1:
-                    logging.info("Conflict in path {}".format(path))
-            raise GitConflictException
+        args = ["merge-tree", "--write-tree", "--messages", "-z"]
+        if merge_base:
+            args.extend(["--merge-base", merge_base])
+        args.extend([branch1, branch2])
 
-    async def synthetic_amend(self, commit_info: CommitHeader) -> GitCommitHash:
+        ret, stdout = await self.git(*args, raiseonerror=False)
+
+        # See man page for git merge-tree for a complete breakdown of the output format
+        sections = stdout.split("\0\0")
+        subsections = [s.split("\0") for s in sections]
+        tree_hash = GitTreeHash(subsections[0][0])
+
+        if ret == 0:
+            new_commit_info.tree = tree_hash
+            return await self.commit_tree(new_commit_info)
+        elif ret == 1:
+            # conflicted_files would be subsections[0][1:] but we don't currently use this info
+            # (it corresponds to higher order files in cache).
+            informational = subsections[1]
+            # Information section is formatted as a list of conflicts:
+            # <num paths> <paths> <type> <message>
+            # We parse num paths first and loop through to extract the other fields.
+            e = GitConflictException(tree_hash)
+            i = 0
+            while i < len(informational) - 1:
+                num_paths = int(informational[i])
+                e.conflicts.append(
+                    GitConflict(
+                        informational[i + 1 + num_paths],
+                        informational[i + 2 + num_paths].strip(),
+                        informational[i + 1 : i + 1 + num_paths],
+                    )
+                )
+                i += num_paths + 3
+            raise e
+        else:
+            raise RuntimeError(f"Unexpected / unknown error in git merge-tree {ret}")
+
+    async def dump_conflict(self, e: GitConflictException) -> None:
         """
-        Return a commit that contains the contents of the given commit plus the current
-        contents of the cache.
+        Dump conflict to log for informational purposes. For conflicts that have content markers,
+        Look up those sections in the result tree and dump those as well.
         """
-        patch_source = (
-            [
-                self.git_path,
-            ]
-            + GIT_DIFF_ARGS
-            + [
-                "--cached",
-            ]
-        )
-        return await self.synthetic_cherry_pick(
-            commit_info, commit_info.tree, commit_info.parents[0], patch_source
+        for conflict in e.conflicts:
+            if conflict.type == "Auto-merging":
+                # A purely informational message, doesn't indicate a conflict
+                continue
+
+            logging.error(conflict.message)
+
+            if conflict.type == "CONFLICT (contents)":
+                # Look up conflict markers in tree
+                await self.dump_conflict_markers(e.tree, conflict.paths[0])
+
+    async def dump_conflict_markers(self, tree: GitTreeHash, path: str) -> None:
+        """
+        Given a tree and file within the tree, print out all groups of conflict markers,
+        prefixed with the starting and ending line numbers.
+        """
+        groups: List[List[int]] = []
+        conflict_depth = 0
+        lines = (await self.git_stdout("show", f"{tree}:{path}")).split("\n")
+        for lineno, line in enumerate(lines):
+            if line.startswith("<" * 7):
+                if conflict_depth == 0:
+                    groups.append([lineno])
+                conflict_depth += 1
+            if line.startswith(">" * 7) and conflict_depth > 0:
+                conflict_depth -= 1
+                if conflict_depth == 0:
+                    groups[-1].append(lineno + 1)
+
+        ret = []
+        for group in groups:
+            if len(group) != 2:
+                continue
+            ret.append(f"@@ {group[0]}, {group[1]}")
+            for i in range(group[0], group[1]):
+                ret.append(lines[i])
+
+        logging.info("\n".join(ret))
+
+    async def synthetic_amend(
+        self, commit_to_amend: CommitHeader, new_commit: CommitHeader
+    ) -> GitCommitHash:
+        """
+        Return a commit that contains the contents of both commit_to_amend and new_commit
+        """
+        commit_info = copy.deepcopy(commit_to_amend)
+        return await self.merge_tree_commit(
+            new_commit.commit_id, commit_info.commit_id, commit_info, new_commit.parents[0]
         )
 
     async def synthetic_cherry_pick_from_commit(
@@ -687,19 +716,11 @@ class Git:
         """
         Return a commit that contains the contents of the given commit on top of a new parent.
         """
-        patch_source = (
-            [
-                self.git_path,
-            ]
-            + GIT_DIFF_ARGS
-            + [
-                commit_info.commit_id + "~",
-                commit_info.commit_id,
-            ]
-        )
-
-        return await self.synthetic_cherry_pick(
-            commit_info, GitTreeHash(new_parent), new_parent, patch_source
+        commit_info = copy.deepcopy(commit_info)
+        old_parent = commit_info.parents[0]
+        commit_info.parents[0] = new_parent
+        return await self.merge_tree_commit(
+            commit_info.commit_id, new_parent, commit_info, old_parent
         )
 
     async def cherry_pick_from_tree(

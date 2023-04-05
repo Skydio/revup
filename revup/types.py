@@ -1,4 +1,5 @@
-from typing import Dict, NewType
+from dataclasses import dataclass
+from typing import Dict, List, NewType
 
 # A bunch of commonly used type definitions.
 
@@ -9,10 +10,38 @@ GitCommitHash = NewType("GitCommitHash", str)
 GitTreeHash = NewType("GitTreeHash", str)
 
 
+@dataclass
+class CommitHeader:
+    """
+    Represents the information extracted from `git rev-list --header`
+    """
+
+    tree: GitTreeHash
+    parents: List[GitCommitHash]
+    author_name: str = ""
+    author_email: str = ""
+    author_date: str = ""
+    committer_name: str = ""
+    committer_email: str = ""
+    committer_date: str = ""
+    commit_msg: str = ""
+    title: str = ""
+    commit_id: GitCommitHash = GitCommitHash("")
+
+
+@dataclass
+class GitConflict:
+    type: str
+    message: str
+    paths: List[str]
+
+
 # A conflict has appeared while doing a git operation. The higher level command
-# will catch this so it can deliver case specific advice to the user.
+# will catch this so it can either handle it or re-raise.
 class GitConflictException(Exception):
-    pass
+    def __init__(self, tree: GitTreeHash):
+        self.tree = tree
+        self.conflicts: List[GitConflict] = []
 
 
 # Incorrect arguments or other usage error.
@@ -20,8 +49,20 @@ class RevupUsageException(Exception):
     pass
 
 
+# An underlying GitConflictException happened but can't be handled.
 class RevupConflictException(Exception):
-    pass
+    def __init__(
+        self,
+        commit: CommitHeader,
+        parent: GitCommitHash,
+        advice: str,
+        commit_src: str = "",
+        parent_src: str = "",
+    ):
+        self.message = (
+            f'Failed to cherry-pick commit: "{commit.title}" ({commit.commit_id[:8]})'
+            f"{commit_src} to new parent ({parent[:8]}){parent_src}.\n{advice}"
+        )
 
 
 class RevupShellException(Exception):

@@ -1,12 +1,11 @@
 import argparse
-import logging
 import subprocess
 from typing import Optional
 
 from rich import get_console
 
 from revup import git, github, github_utils, topic_stack
-from revup.types import GitConflictException, RevupShellException
+from revup.types import RevupShellException
 
 
 async def main(
@@ -59,14 +58,9 @@ async def main(
     if args.status:
         return 0
 
-    try:
-        with get_console().status("Creating commits…"):
-            # Need to know rebase information before creating commits
-            await topics.create_commits(args.trim_tags)
-    except GitConflictException as e:
-        logging.error(str(e))
-        logging.error("You need to specify relative topics to prevent this conflict.")
-        return 1
+    with get_console().status("Creating commits…"):
+        # Need to know rebase information before creating commits
+        await topics.create_commits(args.trim_tags)
 
     if args.dry_run:
         topics.print(not args.verbose)

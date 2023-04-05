@@ -6,6 +6,7 @@ import subprocess
 
 from revup import git, topic_stack
 from revup.types import (
+    CommitHeader,
     GitConflictException,
     GitTreeHash,
     RevupConflictException,
@@ -192,8 +193,6 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
         stack[0].commit_msg = new_msg
 
     if has_diff:
-        if not args.drop:
-            stack[-1].tree = GitTreeHash(await git_ctx.git_stdout("write-tree"))
         new_commit = stack[0].parents[0]
 
         for i, commit_obj in enumerate(stack):
@@ -203,13 +202,20 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
             elif i == 0 and len(stack) > 1:
                 # Perform an amend for the first commit, unless there's only one
                 # in which case we can use the tree shortcut.
+                temp_commit = CommitHeader(
+                    GitTreeHash(await git_ctx.git_stdout("write-tree")), [git.HEAD_COMMIT]
+                )
+                temp_commit.title = temp_commit.commit_msg = "cached changes"
+                temp_commit.commit_id = await git_ctx.commit_tree(temp_commit)
+                stack[-1].tree = temp_commit.tree
                 try:
-                    new_commit = await git_ctx.synthetic_amend(commit_obj)
+                    new_commit = await git_ctx.synthetic_amend(commit_obj, temp_commit)
                 except GitConflictException as exc:
+                    await git_ctx.dump_conflict(exc)
                     raise RevupConflictException(
-                        "Couldn't apply cached changes to\n"
-                        f'"{commit_obj.title}" ({commit_obj.commit_id[:8]})\n'
-                        "You may need to `git rebase -i` to resolve these conflicts!"
+                        temp_commit,
+                        commit_obj.commit_id,
+                        "You may need to `git rebase -i` to resolve these conflicts!",
                     ) from exc
             else:
                 if i == len(stack) - 1 and not args.drop:
@@ -223,10 +229,11 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
                             commit_obj, new_commit
                         )
                     except GitConflictException as exc:
+                        await git_ctx.dump_conflict(exc)
                         raise RevupConflictException(
-                            f'Couldn\'t re-apply commit "{commit_obj.title}"'
-                            f" ({commit_obj.commit_id[:8]})\nYou may need to `git rebase -i` to"
-                            " resolve these conflicts!"
+                            commit_obj,
+                            new_commit,
+                            "You may need to `git rebase -i` to resolve these conflicts!",
                         ) from exc
     else:
         # If there's no diff (only text changed), its much faster to use the same trees
