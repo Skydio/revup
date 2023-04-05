@@ -57,7 +57,7 @@ def configure_logger(debug: bool, redactions: Dict[str, str]) -> None:
     log_filter = RedactingFilter()
     for k, v in redactions.items():
         log_filter.redact(k, v)
-    handler = RevupRichHandler()
+    handler = RevupRichHandler(keywords=[])
     handler.addFilter(log_filter)
     handler.set_render(
         LogRender(
@@ -67,6 +67,7 @@ def configure_logger(debug: bool, redactions: Dict[str, str]) -> None:
             level_width=1,
         )
     )
+    handler.highlighter = None  # type: ignore
 
     root_logger = logging.getLogger()
     root_logger.addHandler(handler)
