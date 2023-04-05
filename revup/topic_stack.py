@@ -919,7 +919,7 @@ class TopicStack:
 
         to_fetch = set()
         for _, _, _, review in self.all_reviews_iter():
-            if review.pr_info is not None and not await self.git_ctx.commit_exists(
+            if review.pr_info is not None and not await self.git_ctx.is_branch_or_commit(
                 review.pr_info.headRefOid
             ):
                 to_fetch.add(review.pr_info.headRefOid)
@@ -1293,7 +1293,7 @@ class TopicStack:
         git_env = {
             "GIT_REFLOG_ACTION": "reset --soft (revup restack)",
         }
-        await self.git_ctx.git("reset", "--soft", new_parent, env=git_env)
+        await self.git_ctx.soft_reset(new_parent, git_env)
         return new_parent
 
     def num_reviews_changed(self) -> int:

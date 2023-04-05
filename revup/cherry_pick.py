@@ -14,7 +14,8 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
     branch_to_pick = args.branch[0]
     remote_branch_to_pick = git_ctx.ensure_branch_prefix(branch_to_pick)
     branch_exists, remote_branch_exists = await asyncio.gather(
-        git_ctx.commit_exists(branch_to_pick), git_ctx.commit_exists(remote_branch_to_pick)
+        git_ctx.is_branch_or_commit(branch_to_pick),
+        git_ctx.is_branch_or_commit(remote_branch_to_pick),
     )
     if remote_branch_exists and not branch_exists:
         logging.warning(

@@ -6,6 +6,7 @@ import re
 import shutil
 import tempfile
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any, Dict, List, NamedTuple, Optional, Pattern, Tuple
 
 from revup import shell
@@ -181,7 +182,7 @@ async def make_git(
         git_ctx.git_stdout("--version"),
         get_email(),
         get_editor(),
-        git_ctx.commit_exists(f"{remote_name}/{main_branch}"),
+        git_ctx.is_branch_or_commit(f"{remote_name}/{main_branch}"),
     )
 
     if git_version:
@@ -262,6 +263,18 @@ class Git:
         )
         if self.keep_temp:
             os.makedirs(self.get_scratch_dir(), exist_ok=True)
+
+    def clear_cache(self) -> None:
+        """
+        Clear caches for all functions that are decorated with lru_cache(). This is generally
+        overdoing it since its usually sufficient to only clear certain entries, however most usages
+        currently happen at the end of the program so it isn't worth optimizing now.
+        """
+        self.is_branch_or_commit.cache_clear()  # pylint: disable=no-member
+        self.to_commit_hash.cache_clear()  # pylint: disable=no-member
+        self.fork_point.cache_clear()  # pylint: disable=no-member
+        self.distance_to_fork_point.cache_clear()  # pylint: disable=no-member
+        self.have_identical_trees.cache_clear()  # pylint: disable=no-member
 
     def get_scratch_dir(self) -> str:
         """
@@ -344,6 +357,7 @@ class Git:
             rev_list_args.extend(["--not", exclude])
         return await self.git_stdout(*rev_list_args)
 
+    @lru_cache(maxsize=None)
     async def is_branch_or_commit(self, obj: str) -> bool:
         return await self.git_return_code("rev-parse", "--verify", "--quiet", obj) == 0
 
@@ -351,16 +365,13 @@ class Git:
         if not await self.is_branch_or_commit(obj):
             raise RevupUsageException(f"{obj} is not a commit or branch name!")
 
-    async def commit_exists(self, obj: str) -> bool:
-        return (
-            await self.git_return_code("rev-parse", "--verify", "--quiet", obj + "^{commit}") == 0
-        )
-
+    @lru_cache(maxsize=None)
     async def to_commit_hash(self, ref: str) -> GitCommitHash:
         return GitCommitHash(
             await self.git_stdout("rev-parse", "--verify", "--quiet", ref + "^{commit}")
         )
 
+    @lru_cache(maxsize=None)
     async def fork_point(self, ref: str, baseRef: str) -> GitCommitHash:
         """
         Define the fork-point of your branch and a base branch as the commit at
@@ -390,6 +401,7 @@ class Git:
             return GitCommitHash(ref)
         return GitCommitHash(f"{commit}~")
 
+    @lru_cache(maxsize=None)
     async def distance_to_fork_point(self, ref: str, baseRef: str, max_n: int = 0) -> int:
         """
         Return number of commits between ref and its fork point with baseRef, up to the given max.
@@ -417,6 +429,7 @@ class Git:
             return True
         return await self.distance_to_fork_point(ref, ancestor, 1) == 0
 
+    @lru_cache(maxsize=None)
     async def have_identical_trees(self, ref1: GitCommitHash, ref2: GitCommitHash) -> bool:
         """
         Return whether two commit-ish have the same trees, which indicate that
@@ -761,3 +774,9 @@ class Git:
         )
 
         return await self.commit_tree(new_commit_info)
+
+    async def soft_reset(self, new_commit: GitCommitHash, env: Dict) -> None:
+        await self.git("reset", "--soft", new_commit, env=env)
+
+        # TODO: only strictly needs to drop entries for HEAD
+        self.clear_cache()
