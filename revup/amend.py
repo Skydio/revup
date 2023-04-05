@@ -237,5 +237,5 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
     git_env = {
         "GIT_REFLOG_ACTION": "reset --soft (revup amend)",
     }
-    await git_ctx.git("reset", "--soft", new_commit, env=git_env)
+    await git_ctx.soft_reset(new_commit, git_env)
     return 0
