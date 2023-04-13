@@ -1348,8 +1348,9 @@ class TopicStack:
                 maybe_draft = " (draft)" if review.is_draft else ""
 
                 get_console().print(
-                    f"[green]Topic:[/] [bold cyan]{name}[/]{maybe_draft} → "
-                    f"{maybe_relative_topic}{maybe_relative_branch}[bold red]{base}[/]"
+                    f"[green]Topic:[/] [bold cyan]{name}[/]{maybe_draft} →"
+                    f" {maybe_relative_topic}{maybe_relative_branch}[bold"
+                    f" red]{self.git_ctx.remove_branch_prefix(base)}[/]"
                 )
                 logging.debug(f"Base rev: {review.base_ref}")
                 if review.new_commits:
