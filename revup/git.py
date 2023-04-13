@@ -5,8 +5,9 @@ import os
 import re
 import shutil
 import tempfile
-from functools import lru_cache
 from typing import Any, Dict, List, NamedTuple, Optional, Pattern, Tuple
+
+from async_lru import alru_cache as lru_cache
 
 from revup import shell
 from revup.types import (
