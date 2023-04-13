@@ -445,10 +445,10 @@ class TopicStack:
             if limit_topics:
                 if name not in limit_topics:
                     # If an explicit list was specified, don't upload other topics
+                    del self.topics[name]
                     continue
                 # Disable the self authored check if this topic was explicitly given
                 self_authored_only = False
-                limit_topics.remove(name)
 
             if self_authored_only:
                 # Don't upload if this topic doesn't have commits authored by the current user
@@ -637,7 +637,8 @@ class TopicStack:
 
         if limit_topics:
             for name in limit_topics:
-                logging.warning(f"Couldn't find any topic named {name}")
+                if name not in self.topics:
+                    logging.warning(f"Couldn't find any topic named {name}")
 
     async def mark_rebases(self, skip_rebase: bool) -> None:
         """
