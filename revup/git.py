@@ -352,9 +352,13 @@ class Git:
 
     @lru_cache(maxsize=None)
     async def to_commit_hash(self, ref: str) -> GitCommitHash:
-        return GitCommitHash(
-            await self.git_stdout("rev-parse", "--verify", "--quiet", ref + "^{commit}")
+        ret, stdout = await self.git(
+            "rev-parse", "--verify", "--quiet", ref + "^{commit}", raiseonerror=False
         )
+        if ret != 0:
+            raise RevupUsageException(f"{ref} is not a branch name!")
+
+        return GitCommitHash(stdout)
 
     @lru_cache(maxsize=None)
     async def fork_point(self, ref: str, baseRef: str) -> GitCommitHash:
