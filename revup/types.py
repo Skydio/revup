@@ -73,6 +73,14 @@ class RevupGithubException(Exception):
     def __init__(self, error_json: Dict):
         super().__init__()
         self.error_json = error_json
+        messages = []
+        self.types = []
+        for error in self.error_json:
+            self.types.append(error["type"] if "type" in error else "Unknown")
+            messages.append(error["message"])
+
+        self.type = " ".join(self.types) if self.types else "None"
+        self.message = "\n".join(messages)
 
 
 class RevupRequestException(Exception):

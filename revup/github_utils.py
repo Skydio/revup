@@ -5,7 +5,7 @@ from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple
 
 from revup import github
 from revup.git import GitHubRepoInfo
-from revup.types import GitCommitHash
+from revup.types import GitCommitHash, RevupGithubException
 
 MAX_COMMENTS_TO_QUERY = 3
 
@@ -583,17 +583,26 @@ async def update_pull_requests(github_ep: github.GitHubEndpoint, prs: List[PrUpd
             {add_comments_str}{update_str}{request_reviewers_str}{assignees_str}{add_labels_str}{to_draft_str}{from_draft_str}{edit_comments_str}
         }}"""
 
-    await github_ep.graphql(
-        mutation_str,
-        **comments_args,
-        **inputs_args,
-        **reviewers_args,
-        **assignees_args,
-        **labels_args,
-        **to_draft_args,
-        **from_draft_args,
-        **edit_comments_args,
-    )
+    try:
+        await github_ep.graphql(
+            mutation_str,
+            **comments_args,
+            **inputs_args,
+            **reviewers_args,
+            **assignees_args,
+            **labels_args,
+            **to_draft_args,
+            **from_draft_args,
+            **edit_comments_args,
+        )
+    except RevupGithubException as e:
+        if "timeout" in e.message:
+            logging.warning(
+                "Github update request timed out! Most likely this is a false alarm and changes"
+                " actually succeeded. You may want to rerun this command to verify."
+            )
+        else:
+            raise e
 
 
 RE_PR_URL = re.compile(
