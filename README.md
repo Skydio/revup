@@ -73,11 +73,12 @@ Creating test PRs can be spammy so don't do the tutorial on other people's repos
 git clone https://github.com/<your-name>/revup.git && cd revup
 ```
 
-On first run, revup will prompt you to add github credentials
+On first run, you will need to configure github credentials. Create a personal access token [here](https://github.com/settings/tokens/new)
+and check the box for "full repo permissions". Revup needs this in order to create and modify pull requests. Then run
 ```sh
-revup upload
+revup config github_oauth
 ```
-Create a personal access token [here](https://github.com/settings/tokens/new) and check the box for "full repo permissions". Revup needs this in order to create and modify pull requests.
+and copy and paste the oauth into the prompt.
 
 ## Create independent pull requests
 
