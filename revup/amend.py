@@ -194,7 +194,8 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
 
     if has_diff:
         new_commit = stack[0].parents[0]
-
+        if not args.drop:
+            stack[-1].tree = GitTreeHash(await git_ctx.git_stdout("write-tree"))
         for i, commit_obj in enumerate(stack):
             if i == 0 and args.drop:
                 # Drop the target commit
@@ -202,11 +203,10 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
             elif i == 0 and len(stack) > 1:
                 # Perform an amend for the first commit, unless there's only one
                 # in which case we can use the tree shortcut.
-                temp_commit = CommitHeader(
-                    GitTreeHash(await git_ctx.git_stdout("write-tree")), [git.HEAD_COMMIT]
-                )
+                temp_commit = CommitHeader(stack[-1].tree, [git.HEAD_COMMIT])
                 temp_commit.title = temp_commit.commit_msg = "cached changes"
                 temp_commit.commit_id = await git_ctx.commit_tree(temp_commit)
+                # drop must be false, so this will be the result of write-tree from above
                 stack[-1].tree = temp_commit.tree
                 try:
                     new_commit = await git_ctx.synthetic_amend(commit_obj, temp_commit)
