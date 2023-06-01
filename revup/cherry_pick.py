@@ -1,5 +1,4 @@
 import argparse
-import asyncio
 import logging
 
 from revup import git
@@ -13,17 +12,28 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
     """
     branch_to_pick = args.branch[0]
     remote_branch_to_pick = git_ctx.ensure_branch_prefix(branch_to_pick)
-    branch_exists, remote_branch_exists = await asyncio.gather(
-        git_ctx.is_branch_or_commit(branch_to_pick),
-        git_ctx.is_branch_or_commit(remote_branch_to_pick),
-    )
-    if remote_branch_exists and not branch_exists:
-        logging.warning(
-            f"Couldn't find '{branch_to_pick}', assuming you meant '{remote_branch_to_pick}'"
+    branch_exists = await git_ctx.is_branch_or_commit(branch_to_pick)
+
+    if not branch_exists:
+        logging.info(
+            f"Couldn't find '{branch_to_pick}', trying to fetch from remote '{git_ctx.remote_name}'"
         )
-        branch_to_pick = remote_branch_to_pick
-    elif not branch_exists:
-        raise RevupUsageException(f"Couldn't find ref '{branch_to_pick}'")
+
+        await git_ctx.git(
+            "fetch",
+            "--no-write-fetch-head",
+            "--no-auto-maintenance",
+            "--quiet" if git_ctx.sh.quiet else "--verbose",
+            "--force",
+            git_ctx.remote_name,
+            f"{branch_to_pick}:remotes/{git_ctx.remote_name}/{branch_to_pick}",
+        )
+
+        if await git_ctx.is_branch_or_commit(remote_branch_to_pick):
+            logging.info(f"Found '{remote_branch_to_pick}'")
+            branch_to_pick = remote_branch_to_pick
+        else:
+            raise RevupUsageException(f"Couldn't find ref '{branch_to_pick}'")
 
     if args.base_branch:
         base_branch = args.base_branch
