@@ -111,9 +111,9 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
     )
 
     has_diff = has_staged or has_unstaged or args.drop
-    if not has_diff and args.no_edit:
+    if not has_diff and not args.edit:
         return 0
-    if args.insert and args.no_edit:
+    if args.insert and not args.edit:
         raise RevupUsageException("Can't skip wording an inserted commit!")
 
     if args.drop and args.insert:
@@ -164,7 +164,7 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
         stack[0].committer_date = ""
         stack[0].commit_msg = ""
 
-    if not args.no_edit and not args.drop:
+    if args.edit and not args.drop:
         new_msg = invoke_editor_for_commit_msg(
             git_ctx,
             git_ctx.editor,
