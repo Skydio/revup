@@ -270,7 +270,7 @@ async def main() -> int:
     restack_parser.add_argument("--topicless-last", "-t", action="store_true")
 
     amend_parser.add_argument("ref_or_topic", nargs="?")
-    amend_parser.add_argument("--no-edit", "--skip-reword", "-s", action="store_true")
+    amend_parser.add_argument("--edit", "-s", default=True, action="store_true")
     amend_parser.add_argument("--insert", "-i", action="store_true")
     amend_parser.add_argument("--drop", "-d", action="store_true")
     amend_parser.add_argument("--all", "-a", action="store_true")
