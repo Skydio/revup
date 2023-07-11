@@ -344,7 +344,9 @@ class Git:
 
     @lru_cache(maxsize=None)
     async def is_branch_or_commit(self, obj: str) -> bool:
-        return await self.git_return_code("rev-parse", "--verify", "--quiet", obj) == 0
+        return (
+            await self.git_return_code("rev-parse", "--verify", "--quiet", obj + "^{commit}") == 0
+        )
 
     async def verify_branch_or_commit(self, obj: str) -> None:
         if not await self.is_branch_or_commit(obj):
