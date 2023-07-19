@@ -110,11 +110,10 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
         get_has_unstaged(),
     )
 
+    args.edit = args.edit or args.insert
     has_diff = has_staged or has_unstaged or args.drop
     if not has_diff and not args.edit:
         return 0
-    if args.insert and not args.edit:
-        raise RevupUsageException("Can't skip wording an inserted commit!")
 
     if args.drop and args.insert:
         raise RevupUsageException("Doesn't make sense to drop and insert")
