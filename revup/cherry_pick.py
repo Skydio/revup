@@ -2,15 +2,17 @@ import argparse
 import logging
 
 from revup import git
-from revup.types import GitCommitHash, RevupUsageException
+from revup.types import GitCommitHash, GitTreeHash, RevupUsageException
 
 
-async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
+async def find_branch_fetch_if_necessary(git_ctx: git.Git, branch_to_pick: str) -> str:
     """
-    Squash the given branch's changes into a single commit, and cherry-pick
-    that commit onto the local branch.
+    Resolve the given branch_to_pick to a local branch, or fetch it from the remote
+
+    Throws RevupUsageException if the branch doesn't exist locally or remotely
+
+    Returns the ref for the local or remote branch
     """
-    branch_to_pick = args.branch[0]
     remote_branch_to_pick = git_ctx.ensure_branch_prefix(branch_to_pick)
     branch_exists = await git_ctx.is_branch_or_commit(branch_to_pick)
 
@@ -35,9 +37,18 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
         else:
             raise RevupUsageException(f"Couldn't find ref '{branch_to_pick}'")
 
+    return branch_to_pick
+
+
+async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
+    """
+    Squash the given branch's changes into a single commit, and cherry-pick
+    that commit onto the local branch.
+    """
+    branch_to_pick = await find_branch_fetch_if_necessary(git_ctx, args.branch[0])
+
     if args.base_branch:
-        base_branch = args.base_branch
-        await git_ctx.verify_branch_or_commit(base_branch)
+        base_branch = await find_branch_fetch_if_necessary(git_ctx, args.base_branch)
     else:
         base_branch = await git_ctx.get_best_base_branch(branch_to_pick, True)
 
@@ -78,7 +89,7 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
     commit_info = git.parse_rev_list(
         await git_ctx.git_stdout("rev-list", "--header", first_commit, "--not", first_commit + "~"),
     )[0]
-    commit_info.tree = branch_to_pick + "^{tree}"
+    commit_info.tree = GitTreeHash(branch_to_pick + "^{tree}")
     commit_info.parents = [GitCommitHash(parent)]
 
     to_cherry_pick = await git_ctx.commit_tree(commit_info)
