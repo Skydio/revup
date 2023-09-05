@@ -14,8 +14,12 @@ from revup.types import (
 
 def _main() -> None:
     try:
-        # Exit code of 1 is reserved for exception-based exits
-        sys.exit(asyncio.run(main()))
+        # Exit code of 1 is reserved for exception-based exits.
+        # Note: on Windows, asyncio.run() doesn't work properly due to this issue:
+        # https://stackoverflow.com/questions/63860576/asyncio-event-loop-is-closed-when-using-asyncio-run
+        # Since revup makes use of subprocess, we can't use WindowsSelectorEventLoopPolicy.
+        # Instead, we can manually create the event loop and prevent the RuntimeError on shutdown.
+        sys.exit(asyncio.get_event_loop().run_until_complete(main()))
     except RevupUsageException as e:
         logging.error(str(e))
         sys.exit(2)
