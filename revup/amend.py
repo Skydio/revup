@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import logging
 import re
+import shlex
 import subprocess
 
 from revup import git, topic_stack
@@ -38,7 +39,7 @@ with '#' will be ignored, and an empty message aborts the commit.\n{topic_summar
     with open(git_ctx.get_scratch_dir() + "/COMMIT_EDITMSG", mode="w") as temp_file:
         temp_file.write(f"{commit_msg}\n{comment_text}")
 
-    subprocess.check_call((*(editor.split()), temp_file.name))
+    subprocess.check_call((*shlex.split(editor), temp_file.name))
     with open(temp_file.name, "r") as editor_file:
         msg = editor_file.read()
 
