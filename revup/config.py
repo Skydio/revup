@@ -28,10 +28,10 @@ class Config:
         self.repo_config_path = repo_config_path
 
     def read(self) -> None:
-        if self.repo_config_path:
-            self.config.read(self.repo_config_path)
         if self.config_path:
             self.config.read(self.config_path)
+        if self.repo_config_path:
+            self.config.read(self.repo_config_path)
 
     def write(self) -> None:
         if not self.dirty:
