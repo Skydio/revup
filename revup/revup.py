@@ -200,6 +200,13 @@ async def github_connection(
         )
 
     if not args.github_oauth:
+        args.github_oauth = await git_ctx.credential(
+            protocol="https",
+            host=args.github_url,
+            path=f"/{fork_info.owner}/{fork_info.name}.git",
+        )
+
+    if not args.github_oauth:
         raise RevupUsageException(
             "No Github OAuth token configured! "
             "Make one at https://github.com/settings/tokens/new "

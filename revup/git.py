@@ -806,3 +806,38 @@ class Git:
 
         # TODO: only strictly needs to drop entries for HEAD
         self.clear_cache()
+
+    async def credential(self, **kwargs: Dict[str, str]) -> str:
+        cred = Credential(self, description=kwargs)
+        await cred.fill()
+        return cred.password
+
+
+class Credential():
+    git_ctx: Git
+    description: Dict[str, str]
+
+    def __init__(self, git: Git, description: Dict[str, str]):
+        self.git_ctx = git
+        self.description = description
+
+    def __getattr__(self, attr):
+        return self.description[attr]
+
+    async def _run(self, subcommand, input: Dict[str, str]) -> Dict[str, str]:
+        input_str = "\n".join(f"{k}={v}" for k, v in input.items())
+        stdout_str = await self.git_ctx.git_stdout("credential", subcommand, input_str=input_str)
+        stdout = {}
+        for line in stdout_str.splitlines():
+            if line == "":
+                break
+            k, v = line.split("=", 1)
+            stdout[k] = v
+        return stdout
+
+    async def fill(self):
+        self.description = await self._run("fill", self.description)
+
+    async def report(self, success: bool):
+        cmd = "approve" if success else "reject"
+        await self._run(cmd, self.description)
