@@ -366,17 +366,15 @@ async def create_pull_requests(
         headRef = (
             pr.headRef if fork_info.owner == repo_info.owner else f"{fork_info.owner}:{pr.headRef}"
         )
-        inputs.append(
-            {
-                "baseRefName": pr.baseRef,
-                "body": pr.body,
-                "clientMutationId": "revup",
-                "headRefName": headRef,
-                "repositoryId": repo_id,
-                "title": pr.title,
-                "draft": pr.is_draft,
-            }
-        )
+        inputs.append({
+            "baseRefName": pr.baseRef,
+            "body": pr.body,
+            "clientMutationId": "revup",
+            "headRefName": headRef,
+            "repositoryId": repo_id,
+            "title": pr.title,
+            "draft": pr.is_draft,
+        })
     inputs_args = get_args_dict(inputs, "pr")
     prs_out = get_result_args(len(inputs), "pr_out")
 
@@ -431,65 +429,51 @@ async def update_pull_requests(github_ep: github.GitHubEndpoint, prs: List[PrUpd
         inputs.append(update_dict)
 
         if pr.label_ids:
-            labels.append(
-                {
-                    "labelIds": list(pr.label_ids),
-                    "clientMutationId": "revup",
-                    "labelableId": pr.id,
-                }
-            )
+            labels.append({
+                "labelIds": list(pr.label_ids),
+                "clientMutationId": "revup",
+                "labelableId": pr.id,
+            })
 
         if pr.reviewer_ids:
-            reviewers.append(
-                {
-                    "userIds": list(pr.reviewer_ids),
-                    "clientMutationId": "revup",
-                    "pullRequestId": pr.id,
-                    "union": True,
-                }
-            )
+            reviewers.append({
+                "userIds": list(pr.reviewer_ids),
+                "clientMutationId": "revup",
+                "pullRequestId": pr.id,
+                "union": True,
+            })
         if pr.assignee_ids:
-            assignees.append(
-                {
-                    "assigneeIds": list(pr.assignee_ids),
-                    "clientMutationId": "revup",
-                    "assignableId": pr.id,
-                }
-            )
+            assignees.append({
+                "assigneeIds": list(pr.assignee_ids),
+                "clientMutationId": "revup",
+                "assignableId": pr.id,
+            })
 
         if pr.is_draft is not None:
             if pr.is_draft:
-                convert_to_draft.append(
-                    {
-                        "clientMutationId": "revup",
-                        "pullRequestId": pr.id,
-                    }
-                )
+                convert_to_draft.append({
+                    "clientMutationId": "revup",
+                    "pullRequestId": pr.id,
+                })
             else:
-                convert_from_draft.append(
-                    {
-                        "clientMutationId": "revup",
-                        "pullRequestId": pr.id,
-                    }
-                )
+                convert_from_draft.append({
+                    "clientMutationId": "revup",
+                    "pullRequestId": pr.id,
+                })
 
         for c in pr.comments:
             if c.id:
-                edit_comments.append(
-                    {
-                        "body": c.text,
-                        "clientMutationId": "revup",
-                        "id": c.id,
-                    }
-                )
+                edit_comments.append({
+                    "body": c.text,
+                    "clientMutationId": "revup",
+                    "id": c.id,
+                })
             else:
-                comments.append(
-                    {
-                        "body": c.text,
-                        "clientMutationId": "revup",
-                        "subjectId": pr.id,
-                    }
-                )
+                comments.append({
+                    "body": c.text,
+                    "clientMutationId": "revup",
+                    "subjectId": pr.id,
+                })
 
     inputs_args = get_args_dict(inputs, "pr")
     prs_out = get_result_args(len(inputs), "pr_out")

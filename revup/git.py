@@ -471,12 +471,10 @@ class Git:
         if prune_old:
             fork_with_main = await self.fork_point(commit, f"{self.remote_name}/{self.main_branch}")
             # A branch that doesn't contain the fork with main must be too old
-            args.extend(
-                (
-                    "--contains",
-                    fork_with_main,
-                )
-            )
+            args.extend((
+                "--contains",
+                fork_with_main,
+            ))
 
         RE_REMOTE_REF = re.compile(r"^refs/remotes/(?P<branch>.*)$")
         ret: List[str] = []
