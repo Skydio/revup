@@ -564,7 +564,8 @@ async def update_pull_requests(github_ep: github.GitHubEndpoint, prs: List[PrUpd
     # Have any add comment mutations first in order to ensure that comments are at the top of the PR
     mutation_str = f"""
         mutation ({arg_str}) {{
-            {add_comments_str}{update_str}{request_reviewers_str}{assignees_str}{add_labels_str}{to_draft_str}{from_draft_str}{edit_comments_str}
+            {add_comments_str}{update_str}{request_reviewers_str}{assignees_str}{add_labels_str}\
+{to_draft_str}{from_draft_str}{edit_comments_str}
         }}"""
 
     try:
