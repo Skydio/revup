@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: [3.8.14, 3.9.14, 3.10.7]
+        python-version: [3.8.18, 3.10.10, 3.12.1]
     name: Run lint and install checks
     steps:
       - name: Install pandoc
