@@ -21,7 +21,7 @@ check_format:
 	$(BLACK_CMD) --check --diff .
 	$(ISORT_CMD) --check --diff .
 
-MYPY_COMMAND=$(PYTHON) -m mypy --show-error-code
+MYPY_COMMAND=$(PYTHON) -m mypy --show-error-codes
 check_types:
 	$(MYPY_COMMAND) revup
 
