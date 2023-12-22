@@ -130,7 +130,7 @@ class Shell:
 
     async def create_sh_task(
         self,
-        *args: str,  # noqa: C901
+        *args: str,
         env: Optional[Dict[str, str]] = None,
         stderr: _HANDLE = None,
         # TODO: Arguably bytes should be accepted here too
@@ -170,7 +170,7 @@ class Shell:
 
     async def sh(
         self,
-        *args: str,  # noqa: C901
+        *args: str,
         env: Optional[Dict[str, str]] = None,
         stderr: _HANDLE = None,
         # TODO: Arguably bytes should be accepted here too
@@ -245,6 +245,13 @@ class Shell:
         )
 
         _, _, err1, ret1, _, out2, err2, ret2 = await asyncio.gather(*tasks[0], *tasks[1])
+
+        # Different mypy versions waffle between treating the result of gather as a Tuple
+        # (and thus separating types by index) or List (and thus treating all elements as
+        # all possible types). These asserts ensure lint passes in the second case.
+        assert isinstance(ret1, int) and isinstance(ret2, int)
+        assert isinstance(err1, bytes) and isinstance(err2, bytes)
+        assert isinstance(out2, bytes)
 
         ret = self.handle_sh_results(
             ret2 if ret1 == 0 else ret1, out2, err1 + err2, stdout, raiseonerror, *log_args
