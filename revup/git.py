@@ -807,13 +807,13 @@ class Git:
         # TODO: only strictly needs to drop entries for HEAD
         self.clear_cache()
 
-    async def credential(self, **kwargs: Dict[str, str]) -> str:
+    async def credential(self, **kwargs: str) -> str:
         cred = Credential(self, description=kwargs)
         await cred.fill()
         return cred.password
 
 
-class Credential():
+class Credential:
     git_ctx: Git
     description: Dict[str, str]
 
@@ -821,23 +821,23 @@ class Credential():
         self.git_ctx = git
         self.description = description
 
-    def __getattr__(self, attr):
+    def __getattr__(self, attr: str) -> Any:
         return self.description[attr]
 
-    async def _run(self, subcommand, input: Dict[str, str]) -> Dict[str, str]:
-        input_str = "\n".join(f"{k}={v}" for k, v in input.items())
+    async def _run(self, subcommand: str, args: Dict[str, str]) -> Dict[str, str]:
+        input_str = "\n".join(f"{k}={v}" for k, v in args.items())
         stdout_str = await self.git_ctx.git_stdout("credential", subcommand, input_str=input_str)
-        stdout = {}
+        stdout_dict = {}
         for line in stdout_str.splitlines():
             if line == "":
                 break
             k, v = line.split("=", 1)
-            stdout[k] = v
-        return stdout
+            stdout_dict[k] = v
+        return stdout_dict
 
-    async def fill(self):
+    async def fill(self) -> None:
         self.description = await self._run("fill", self.description)
 
-    async def report(self, success: bool):
+    async def report(self, success: bool) -> None:
         cmd = "approve" if success else "reject"
         await self._run(cmd, self.description)
