@@ -39,7 +39,17 @@ clean:
 
 REVUP_VERSION:=$(shell $(PYTHON) revup/__init__.py)
 REVUP_DATE ?= Apr 21, 2021
-REVUP_HEADER=---\ntitle: TITLE\nsection: 1\nheader: Revup Manual\nfooter: revup VERSION\ndate: DATE\n---\n
+define REVUP_HEADER
+---
+title: TITLE
+section: 1
+header: Revup Manual
+footer: revup VERSION
+date: DATE
+---
+endef
+export REVUP_HEADER
+
 REVUP_VERSION_HASH?=${shell git rev-parse --short v$(REVUP_VERSION) || echo main}
 
 package: man
@@ -62,7 +72,7 @@ man:
 	cd docs ; \
 	for file in *.md ; do \
 		CMD_NAME=`echo $${file} | awk -F'[.]' '{print $$1}'` ; \
-		echo "$(REVUP_HEADER)" | m4 -DTITLE=$${CMD_NAME} -DVERSION=$(REVUP_VERSION) -DDATE="$(REVUP_DATE)" - | \
+		echo "$${REVUP_HEADER}" | m4 -DTITLE=$${CMD_NAME} -DVERSION=$(REVUP_VERSION) -DDATE="$(REVUP_DATE)" - | \
 		cat - $${file} | pandoc -s -t man > ../revup/man1/$${CMD_NAME}.1 || exit 1 ; \
 		gzip -n -f -k ../revup/man1/$${CMD_NAME}.1 || exit 1 ; \
 	done
