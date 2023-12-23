@@ -205,11 +205,14 @@ async def github_connection(
             host=args.github_url,
             path=f"/{fork_info.owner}/{fork_info.name}.git",
         )
+        if args.github_oauth != "":
+            logging.debug("Used credential from git-credential")
 
     if not args.github_oauth:
         raise RevupUsageException(
-            "No Github OAuth token configured! "
-            "Make one at https://github.com/settings/tokens/new "
+            "No Github OAuth token found! "
+            "Login with 'gh auth login' "
+            "or make one at https://github.com/settings/tokens/new "
             "(revup needs full repo permissions) "
             "then set it with `revup config github_oauth`."
         )
