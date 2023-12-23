@@ -8,6 +8,7 @@ all: deps lint man package install
 deps:
 	$(PYTHON) -m pip install black isort pylint mypy build twine pytest pytest-mock
 	$(PYTHON) -m pip install .
+	sudo apt install pandoc python3-venv
 
 # Format using black
 BLACK_CMD=$(PYTHON) -m black --line-length 100 -t py38 --preview --exclude "build/.*|\.eggs/.*"
