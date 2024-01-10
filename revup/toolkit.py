@@ -3,6 +3,7 @@ import asyncio
 import logging
 
 from revup import git
+from revup.topic_stack import TopicStack
 from revup.types import RevupUsageException
 
 
@@ -56,5 +57,14 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
     elif args.toolkit_cmd == "closest-branch":
         await git_ctx.verify_branch_or_commit(args.branch[0])
         logging.info(await git_ctx.get_best_base_branch(args.branch[0], allow_self=args.allow_self))
+    elif args.toolkit_cmd == "list-topics":
+        topics = TopicStack(git_ctx, args.base_branch, args.relative_branch)
+        await topics.populate_topics()
+        for topic in topics.topics.values():
+            logging.info(topic.name)
+            if args.commit_ids or args.titles:
+                for commit in topic.original_commits:
+                    logging.info(commit.commit_id if args.commit_ids else commit.title)
+                logging.info("")
 
     return 0

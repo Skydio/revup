@@ -338,6 +338,28 @@ async def main() -> int:
     toolkit_closest_branch.add_argument(
         "--allow-self", action="store_true", help='Allow the branch itself to be a valid "closest"'
     )
+    toolkit_list_topics = toolkit_subparsers.add_parser(
+        "list-topics", description="List all topics and their commits"
+    )
+    toolkit_list_topics.add_argument(
+        "--base-branch", "-b", help="Use the given branch as the base instead of autodetecting."
+    )
+    toolkit_list_topics.add_argument(
+        "--relative-branch", "-e", help="Use the given relative branch."
+    )
+    list_topics_commit_options = toolkit_list_topics.add_mutually_exclusive_group()
+    list_topics_commit_options.add_argument(
+        "--commit-ids",
+        "-c",
+        action="store_true",
+        help="Print the IDs for all commits within a topic",
+    )
+    list_topics_commit_options.add_argument(
+        "--titles",
+        "-t",
+        action="store_true",
+        help="Print the titles for all commits within a topic",
+    )
 
     # Do an initial parsing pass, which handles HelpAction
     args = revup_parser.parse_args()
