@@ -51,6 +51,7 @@ GIT_DIFF_ARGS = [
     "--full-index",
     "--no-color",
     "--no-textconv",
+    "--no-ext-diff",
     "-U1",
 ]
 
