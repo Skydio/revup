@@ -6,8 +6,7 @@ all: deps lint man package install
 
 # Install dependent pip packages, needed to lint or build
 deps:
-	$(PYTHON) -m pip install black isort pylint mypy build twine pytest pytest-mock
-	$(PYTHON) -m pip install .
+	$(PYTHON) -m pip install .[dev]
 
 # Format using black
 BLACK_CMD=$(PYTHON) -m black --line-length 100 -t py38 --preview --exclude "build/.*|\.eggs/.*"
