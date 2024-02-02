@@ -3,7 +3,7 @@ import logging
 import time
 from typing import Any, Optional, Tuple, Union
 
-from aiohttp import ClientSession
+from aiohttp import ClientSession, ContentTypeError
 
 from revup import github
 from revup.types import RevupGithubException, RevupRequestException
@@ -76,8 +76,8 @@ class RealGitHubEndpoint(github.GitHubEndpoint):
             )
             try:
                 r = await resp.json()
-            except ValueError:
-                logging.debug("Response body:\n{}".format(await resp.text()))
+            except (ValueError, ContentTypeError):
+                logging.warning("Response body:\n{}".format(await resp.text()))
                 raise
             else:
                 pretty_json = json.dumps(r, indent=1)
