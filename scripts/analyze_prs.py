@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import argparse
 import datetime
 import json
@@ -14,7 +15,9 @@ import dateutil.relativedelta
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--filename", type=str, help="Filename of json file to analyze")
+    parser.add_argument(
+        "--filename", type=str, help="Filename of json file to analyze", required=True
+    )
     parser.add_argument(
         "--limit_date", action="store_true", help="Whether to limit analysis by date"
     )
