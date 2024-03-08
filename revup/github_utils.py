@@ -323,16 +323,26 @@ async def query_everything(
         this_node = pr_result["data"]["repository"][user_id_out[i]]
         if len(this_node["nodes"]) == 0:
             logging.warning("No matching user found for {}".format(user_id))
-        elif this_node["totalCount"] > len(this_node["nodes"]):
-            logging.warning("Too many matching users found for {}".format(user_id))
         else:
+            if this_node["totalCount"] > len(this_node["nodes"]):
+                logging.warning(
+                    "Too many matching users found for {}, try being more specific".format(user_id)
+                )
             shortest_name = this_node["nodes"][0]["login"]
             names_to_ids[user_id] = this_node["nodes"][0]["id"]
+            found_match = False
             for user in this_node["nodes"]:
-                if len(user["login"]) <= len(shortest_name):
+                if len(user["login"]) <= len(shortest_name) and user["login"].startswith(user_id):
                     shortest_name = user["login"]
                     names_to_ids[user_id] = user["id"]
                     names_to_logins[user_id] = user["login"]
+                    found_match = True
+            if not found_match:
+                logging.warning(
+                    "Couldn't find a prefixed match for {}, going with {} instead".format(
+                        user_id, shortest_name
+                    )
+                )
 
     labels_to_ids = {}
     for i, label in enumerate(labels):
