@@ -70,8 +70,14 @@ if __name__ == "__main__":
             total_revup += 1
             users[name][1] += 1
 
+    # Delete users from the list with 0 prs
+    for user in list(users.keys()):
+        if users[user][0] == 0:
+            del users[user]
+    args.num_users = min(args.num_users, len(users))
+
     print("Total PRs: {}".format(total))
-    print("Total revup PRs: {}".format(total_revup))
+    print("Total revup PRs: {} ({:.1f}%)".format(total_revup, 100.0 * total_revup / total))
     print(
         "Top {} contributors by number of {}prs".format(
             args.num_users, "revup " if args.sort_by_revup else ""
@@ -82,11 +88,18 @@ if __name__ == "__main__":
     for user in users:
         users_sorted.append((user, users[user][0], users[user][1]))
 
+    # Sort by revup prs and total prs. The arg sort_by_revup determines
+    # the order in which the sorts happen.
+    users_sorted.sort(key=lambda tup: tup[2 - args.sort_by_revup], reverse=True)
     users_sorted.sort(key=lambda tup: tup[1 + args.sort_by_revup], reverse=True)
 
     for i in range(args.num_users):
         print(
-            "{}: {} with {} PRs and {} revup PRs".format(
-                i + 1, users_sorted[i][0], users_sorted[i][1], users_sorted[i][2]
+            "{}: {} with {} PRs and {} revup PRs ({:}%)".format(
+                i + 1,
+                users_sorted[i][0],
+                users_sorted[i][1],
+                users_sorted[i][2],
+                int(100.0 * users_sorted[i][2] / users_sorted[i][1]),
             )
         )
