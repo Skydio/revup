@@ -241,8 +241,13 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
         for stack_entry in stack:
             new_commit = await git_ctx.cherry_pick_from_tree(stack_entry, new_commit)
 
+    reflog_action_str = 'revup amend {}{}: "{}"'.format(
+        "--drop " if args.drop else "--insert " if args.insert else "",
+        stack[0].commit_id[:8],
+        stack[0].commit_msg.splitlines()[0][:40],
+    )
     git_env = {
-        "GIT_REFLOG_ACTION": "reset --soft (revup amend)",
+        "GIT_REFLOG_ACTION": reflog_action_str,
     }
     await git_ctx.soft_reset(new_commit, git_env)
     return 0
