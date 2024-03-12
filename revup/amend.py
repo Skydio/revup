@@ -20,7 +20,7 @@ CLEANUP_SCISSOR_LINE = r"------------------------ >8 ------------------------"
 CLEANUP_SCISSOR_COMMENT = """Do not modify or remove the line above.
 Everything below it will be ignored."""
 CLEANUP_STRIP_COMMENT = """Please enter the commit message for your changes. Lines starting
-with '#' will be ignored, and an empty message aborts the amend."""
+with '{}' will be ignored, and an empty message aborts the amend."""
 
 
 async def invoke_editor_for_commit_msg(
@@ -44,13 +44,18 @@ async def invoke_editor_for_commit_msg(
         # git's default if the message is being edited (which if we've reached this it is)
         cleanup_type = "strip"
 
+    # Respect the configured comment character
+    comment_ret, comment_char = await git_ctx.git("config", "core.commentChar", raiseonerror=False)
+    if comment_ret != 0:
+        comment_char = "#"
+
     comments = f"{topic_summary}\n{stat_text}"
     if cleanup_type == "scissors":
         comments = f"\n{CLEANUP_SCISSOR_LINE}\n{CLEANUP_SCISSOR_COMMENT}\n{comments}"
     elif cleanup_type == "strip":
-        comments = f"\n{CLEANUP_STRIP_COMMENT}\n{comments}"
+        comments = f"\n{CLEANUP_STRIP_COMMENT.format(comment_char)}\n{comments}"
 
-    comments = "\n# ".join(comments.splitlines())
+    comments = "\n{} ".format(comment_char).join(comments.splitlines())
 
     with open(git_ctx.get_scratch_dir() + "/COMMIT_EDITMSG", mode="w") as temp_file:
         temp_file.write(f"{commit_msg}\n{comments}")
@@ -61,9 +66,9 @@ async def invoke_editor_for_commit_msg(
 
     if cleanup_type == "strip":
         # Strip out comment lines
-        msg = re.sub(r"^#.*$\n", "", msg, flags=re.M)
+        msg = re.sub(r"^{}.*$\n".format(comment_char), "", msg, flags=re.M)
     elif cleanup_type == "scissors":
-        msg = msg.split("# " + CLEANUP_SCISSOR_LINE)[0]
+        msg = msg.split(f"{comment_char} {CLEANUP_SCISSOR_LINE}")[0]
 
     if cleanup_type != "verbatim":
         # Match behavior of git, which will trim all trailing whitespace
