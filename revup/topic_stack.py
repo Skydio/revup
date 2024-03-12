@@ -48,6 +48,7 @@ TAG_TOPIC = "topic"
 TAG_RELATIVE = "relative"
 TAG_RELATIVE_BRANCH = "relative-branch"
 TAG_UPLOADER = "uploader"
+TAG_UPDATE_PR_BODY = "update-pr-body"
 VALID_TAGS = {
     TAG_BRANCH,
     TAG_LABEL,
@@ -57,6 +58,7 @@ VALID_TAGS = {
     TAG_ASSIGNEE,
     TAG_TOPIC,
     TAG_UPLOADER,
+    TAG_UPDATE_PR_BODY,
 }
 
 RE_COMMIT_LABEL = re.compile(r"^(?P<label1>[a-zA-Z\-_0-9]+):.*|^\[(?P<label2>[a-zA-Z\-_0-9]+)\].*")
@@ -493,6 +495,14 @@ class TopicStack:
 
             if len(topic.tags[TAG_UPLOADER]) > 1:
                 raise RevupUsageException(f"Can't specify more than one uploader for topic {name}!")
+
+            if TAG_UPDATE_PR_BODY in topic.tags:
+                if len(topic.tags[TAG_UPDATE_PR_BODY]) > 1 or min(
+                    topic.tags[TAG_UPDATE_PR_BODY]
+                ).lower() not in {"true", "false"}:
+                    raise RevupUsageException(
+                        f"Invalid tags for update-pr-body: {topic.tags[TAG_UPDATE_PR_BODY]}"
+                    )
 
             relative_topic = ""
             if force_relative_chain and last_topic is not None:
@@ -1055,7 +1065,7 @@ class TopicStack:
 
     def populate_update_info(
         self,
-        update_pr_body: bool,
+        update_pr_body_arg: bool,
     ) -> None:
         """
         Populate information necessary to do PR creation / update in github.
@@ -1127,6 +1137,11 @@ class TopicStack:
                 assignee_logins = translate_if_exists(
                     topic.tags[TAG_ASSIGNEE], self.names_to_logins
                 ).difference(review.pr_info.assignees)
+
+                if TAG_UPDATE_PR_BODY in topic.tags:
+                    update_pr_body = min(topic.tags[TAG_UPDATE_PR_BODY]).lower() == "true"
+                else:
+                    update_pr_body = update_pr_body_arg
 
                 if review.pr_info.baseRef != review.remote_base:
                     review.pr_update.baseRef = review.remote_base
