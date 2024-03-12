@@ -40,9 +40,7 @@ consecutive locally.
 : Optionally specifies a relative topic for this topic. Each topic can
 have at most one relative topic. Commits in this topic will be cherry-picked
 on top of the branch for the relative topic, and the pull request will
-be created targeted to the relative topic's branch. The first commit
-of a relative topic must appear before the first commit of specifying
-topic.
+be created targeted to the relative topic's branch.
 
 **Branches:**
 : Optionally specifies base branches for this topic. Base branches are long
