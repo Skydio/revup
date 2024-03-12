@@ -82,6 +82,13 @@ branches once they are merged. If a relative branch is specified, only one
 "Branch:" can be specified and all relative topics must specify the same
 relative branch (or none, in which case it will get set automatically).
 
+**Update-Pr-Body:**
+: When set to true (default) revup will attempt to update the github PR body
+whenever the local version has changes. When set to false, revup will create
+PRs with the commit text to start out, but does not attempt to update it again.
+This allows users to use the github UI to edit the PR body without having
+revup overwrite those changes.
+
 For each review, the pull request title is the title of the first commit
 message in that topic, and the body is the body text of the first commit
 message in that topic. A user can also create an empty commit if they
@@ -149,13 +156,9 @@ confirmation step and only print topic info.
 : Print out status info of pull requests for existing topics but don't attempt
 to push or update them.
 
-**--no-update-pr-body**
-: Revup will attempt to update the github PR body whenever the local version
-has changes that differ from the remote. However, this means that if a user
-uses the github web interface to edit the PR body, especially to embed
-HTML or images, revup won't know about it and will try to overwrite it on
-the next upload. With this flag, uploading will only update the pr body
-on creation, but not after, ensuring that any custom PR text is kept.
+**--update-pr-body**
+: Boolean that specifies how the pr body text is updated. See the
+Update-Pr-Body: tag section for details.
 
 **--review-graph**
 : Enable the review graph feature, which adds a comment containing links and
