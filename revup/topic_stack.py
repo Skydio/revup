@@ -428,7 +428,6 @@ class TopicStack:
 
     async def populate_reviews(
         self,
-        uploader: str,
         force_relative_chain: bool = False,
         labels: Optional[str] = None,
         user_aliases: str = "",
@@ -513,13 +512,48 @@ class TopicStack:
 
             if relative_topic:
                 topic.relative_topic = self.topics[relative_topic]
+
+            if labels is not None:
+                topic.tags[TAG_LABEL].update([label.lower() for label in labels.split(",")])
+
+            for c in topic.original_commits:
+                m = RE_COMMIT_LABEL.match(c.commit_msg)
+                if m:
+                    extra_label = m.group("label1") or m.group("label2") or None
+                    if extra_label:
+                        topic.tags[TAG_LABEL].add(extra_label.lower())
+
+            if user_aliases is not None:
+                for mapping in user_aliases.split(","):
+                    # Map usernames from alias -> user_target
+                    alias, _, user_target = mapping.partition(":")
+                    for tag in [TAG_REVIEWER, TAG_ASSIGNEE]:
+                        if alias in topic.tags[tag]:
+                            topic.tags[tag].remove(alias)
+                            topic.tags[tag].add(user_target)
+
+            if auto_add_users in ("r2a", "both"):
+                topic.tags[TAG_ASSIGNEE].update(topic.tags[TAG_REVIEWER])
+            if auto_add_users in ("a2r", "both"):
+                topic.tags[TAG_REVIEWER].update(topic.tags[TAG_ASSIGNEE])
+
+            seen_topics[name] = topic
+
+        if limit_topics:
+            for name in limit_topics:
+                if name not in self.topics:
+                    logging.warning(f"Couldn't find any topic named {name}")
+
+    async def populate_relative_reviews(self, uploader: str) -> None:
+        for name, topic in list(self.topics.items()):
+            if topic.relative_topic:
                 if len(topic.tags[TAG_BRANCH]) == 0:
                     topic.tags[TAG_BRANCH].update(topic.relative_topic.tags[TAG_BRANCH])
                 elif not topic.tags[TAG_BRANCH].issubset(topic.relative_topic.tags[TAG_BRANCH]):
                     raise RevupUsageException(
                         f"Topic {name} has branches"
                         f" {topic.tags[TAG_BRANCH] - topic.relative_topic.tags[TAG_BRANCH]} not in"
-                        f" relative topic {relative_topic}"
+                        f" relative topic {topic.relative_topic.name}"
                     )
 
                 if len(topic.tags[TAG_RELATIVE_BRANCH]) == 0:
@@ -531,8 +565,8 @@ class TopicStack:
                     != topic.relative_topic.tags[TAG_RELATIVE_BRANCH]
                 ):
                     raise RevupUsageException(
-                        f"Topic {name} and relative topic {relative_topic} have differing relative "
-                        f"branches, {topic.tags[TAG_RELATIVE_BRANCH]} vs "
+                        f"Topic {name} and relative topic {topic.relative_topic.name} have "
+                        f"differing relative branches, {topic.tags[TAG_RELATIVE_BRANCH]} vs "
                         f"{topic.relative_topic.tags[TAG_RELATIVE_BRANCH]}"
                     )
             else:
@@ -571,29 +605,10 @@ class TopicStack:
             ):
                 raise RevupUsageException(
                     f"Topic {name} has uploader '{topic.tags[TAG_UPLOADER]}' while relative topic"
-                    f" {relative_topic} has uploader"
+                    f" {topic.relative_topic.name} has uploader"
                     f" {topic.relative_topic.tags[TAG_UPLOADER] or '{}'}"
                 )
             topic_uploader = min(topic.tags[TAG_UPLOADER]) if topic.tags[TAG_UPLOADER] else uploader
-
-            for c in topic.original_commits:
-                m = RE_COMMIT_LABEL.match(c.commit_msg)
-                if m:
-                    extra_label = m.group("label1") or m.group("label2") or None
-                    if extra_label:
-                        topic.tags[TAG_LABEL].add(extra_label.lower())
-
-            if labels is not None:
-                topic.tags[TAG_LABEL].update([label.lower() for label in labels.split(",")])
-
-            if user_aliases is not None:
-                for mapping in user_aliases.split(","):
-                    # Map usernames from alias -> user_target
-                    alias, _, user_target = mapping.partition(":")
-                    for tag in [TAG_REVIEWER, TAG_ASSIGNEE]:
-                        if alias in topic.tags[tag]:
-                            topic.tags[tag].remove(alias)
-                            topic.tags[tag].add(user_target)
 
             for branch in topic.tags[TAG_BRANCH]:
                 review = Review(topic)
@@ -627,18 +642,6 @@ class TopicStack:
 
             # Don't add draft as a label since its instead used to mark a pr as a draft
             topic.tags[TAG_LABEL].discard("draft")
-
-            if auto_add_users in ("r2a", "both"):
-                topic.tags[TAG_ASSIGNEE].update(topic.tags[TAG_REVIEWER])
-            if auto_add_users in ("a2r", "both"):
-                topic.tags[TAG_REVIEWER].update(topic.tags[TAG_ASSIGNEE])
-
-            seen_topics[name] = topic
-
-        if limit_topics:
-            for name in limit_topics:
-                if name not in self.topics:
-                    logging.warning(f"Couldn't find any topic named {name}")
 
     async def mark_rebases(self, skip_rebase: bool) -> None:
         """
