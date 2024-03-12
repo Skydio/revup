@@ -21,13 +21,15 @@ When rewording commits, abort if the resulting message is empty.
 If there are no changes to either the tree or the commit message,
 no commit hashes will change.
 
-Currently, conflicts between the cache and target commit or between
-the new commit and later commits aren't handled. If any conflict arises,
-the conflicting file paths will be printed and the program will exit
-without making any changes.
+When rewording commits, this command will respect the values for
+`git config commit.cleanup` and `git config core.commentChar`.
 
-In the future `revup amend` will be able to show conflict markers
-and provide the user a way to resolve conflicts.
+Currently, conflicts between the cache and target commit or between
+the new commit and later commits are only handled by printing the
+conflicting paths, nature of the conflict, and the conflict markers
+if applicable.
+
+In the future `revup amend` will provide the user a way to resolve conflicts.
 
 # OPTIONS
 
