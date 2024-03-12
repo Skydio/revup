@@ -16,8 +16,14 @@ from revup.types import (
 
 RE_TOPIC_WITH_MODIFIERS = re.compile(r"(?P<topic>[a-zA-Z\-_0-9]+)(?P<modifiers>[\^~]+[0-9]*)?")
 
+CLEANUP_SCISSOR_LINE = r"------------------------ >8 ------------------------"
+CLEANUP_SCISSOR_COMMENT = """Do not modify or remove the line above.
+Everything below it will be ignored."""
+CLEANUP_STRIP_COMMENT = """Please enter the commit message for your changes. Lines starting
+with '#' will be ignored, and an empty message aborts the amend."""
 
-def invoke_editor_for_commit_msg(
+
+async def invoke_editor_for_commit_msg(
     git_ctx: git.Git, editor: str, topic_summary: str, commit_msg: str, cache_stat: str, stat: str
 ) -> str:
     """
@@ -32,19 +38,42 @@ def invoke_editor_for_commit_msg(
         full_stat.append(f"Original commit:\n{stat}")
     stat_text = "\n\n".join(full_stat)
 
-    comment_text = f"""\nPlease enter the commit message for your changes. Lines starting
-with '#' will be ignored, and an empty message aborts the commit.\n{topic_summary}\n{stat_text}"""
-    comment_text = "\n# ".join(comment_text.splitlines())
+    # Respect the configured option for commit msg cleanup.
+    cleanup_ret, cleanup_type = await git_ctx.git("config", "commit.cleanup", raiseonerror=False)
+    if cleanup_ret != 0:
+        # git's default if the message is being edited (which if we've reached this it is)
+        cleanup_type = "strip"
+
+    comments = f"{topic_summary}\n{stat_text}"
+    if cleanup_type == "scissors":
+        comments = f"\n{CLEANUP_SCISSOR_LINE}\n{CLEANUP_SCISSOR_COMMENT}\n{comments}"
+    elif cleanup_type == "strip":
+        comments = f"\n{CLEANUP_STRIP_COMMENT}\n{comments}"
+
+    comments = "\n# ".join(comments.splitlines())
 
     with open(git_ctx.get_scratch_dir() + "/COMMIT_EDITMSG", mode="w") as temp_file:
-        temp_file.write(f"{commit_msg}\n{comment_text}")
+        temp_file.write(f"{commit_msg}\n{comments}")
 
     subprocess.check_call((*shlex.split(editor), temp_file.name))
     with open(temp_file.name, "r") as editor_file:
         msg = editor_file.read()
 
-    # Strip out comment lines
-    return re.sub(r"^\s*#.*$", "", msg, flags=re.M).strip()
+    if cleanup_type == "strip":
+        # Strip out comment lines
+        msg = re.sub(r"^#.*$\n", "", msg, flags=re.M)
+    elif cleanup_type == "scissors":
+        msg = msg.split("# " + CLEANUP_SCISSOR_LINE)[0]
+
+    if cleanup_type != "verbatim":
+        # Match behavior of git, which will trim all trailing whitespace
+        msg = re.sub(r"[ \t]+$", "", msg, flags=re.M)
+        # collapse consecutive empty lines
+        msg = re.sub(r"[\n]{3,}", "\n\n", msg)
+        # and remove all leading and trailing whitespace and newlines
+        msg = msg.strip()
+
+    return msg
 
 
 async def get_topic_summary(topics: topic_stack.TopicStack) -> str:
@@ -165,7 +194,7 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
         stack[0].commit_msg = ""
 
     if args.edit and not args.drop:
-        new_msg = invoke_editor_for_commit_msg(
+        new_msg = await invoke_editor_for_commit_msg(
             git_ctx,
             git_ctx.editor,
             await get_topic_summary(topics) if args.parse_topics else "",
