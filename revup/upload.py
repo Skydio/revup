@@ -34,13 +34,15 @@ async def main(
             raise_on_invalid=True,
         )
         await topics.populate_reviews(
-            args.uploader if args.uploader else git_ctx.author,
             force_relative_chain=args.relative_chain,
             labels=args.labels,
             user_aliases=args.user_aliases,
             auto_add_users=args.auto_add_users,
             self_authored_only=args.self_authored_only,
             limit_topics=args.topics,
+        )
+        await topics.populate_relative_reviews(
+            args.uploader if args.uploader else git_ctx.author,
         )
 
     if not args.dry_run:
