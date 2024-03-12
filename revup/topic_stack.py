@@ -179,6 +179,19 @@ class Topic:
     # Reviews for this topic, keyed by base branch
     reviews: Dict[str, Review] = field(default_factory=dict)
 
+    def depth_first_iter(self) -> Iterator[Topic]:
+        def depth_first_iter_helper(topic: Topic, seen: Set[str]) -> Iterator[Topic]:
+            if topic.name in seen:
+                raise RevupUsageException(
+                    f'Unexpected relative topic cycle at "{topic.name}" chain includes {seen}'
+                )
+            seen.add(topic.name)
+            if topic.relative_topic:
+                yield from depth_first_iter_helper(topic.relative_topic, seen)
+            yield topic
+
+        return depth_first_iter_helper(self, set())
+
 
 @dataclass
 class TopicStack:
@@ -234,9 +247,22 @@ class TopicStack:
         """
         One liner for common iteration pattern to reduce indentation a bit.
         """
-        for name, topic in self.topics.items():
+        for name, topic in self.topological_topics():
             for base_branch, review in topic.reviews.items():
                 yield name, topic, base_branch, review
+
+    def topological_topics(self) -> Iterator[Tuple[str, Topic]]:
+        """
+        Iterate through all topics one at a time with the requirement that any topic must always
+        come after a topic it is relative to.
+        """
+        seen: Set[str] = set()
+        for topic in self.topics.values():
+            for t in topic.depth_first_iter():
+                if t.name in seen:
+                    continue
+                seen.add(t.name)
+                yield t.name, t
 
     def parse_commit_tags(self, commit_msg: str) -> Tuple[Dict[str, Set[str]], str]:
         """
@@ -545,7 +571,7 @@ class TopicStack:
                     logging.warning(f"Couldn't find any topic named {name}")
 
     async def populate_relative_reviews(self, uploader: str) -> None:
-        for name, topic in list(self.topics.items()):
+        for name, topic in self.topological_topics():
             if topic.relative_topic:
                 if len(topic.tags[TAG_BRANCH]) == 0:
                     topic.tags[TAG_BRANCH].update(topic.relative_topic.tags[TAG_BRANCH])
