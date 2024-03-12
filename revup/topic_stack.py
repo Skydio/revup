@@ -465,7 +465,8 @@ class TopicStack:
         Populate reviews for already-parsed topics. Verify base branch and relative topic info to
         ensure it is valid.
         """
-        seen_topics: Dict[str, Topic] = {}
+        last_topic = None
+        # Copy topics before iterating so it's safe to delete from the original dict
         for name, topic in list(self.topics.items()):
             if limit_topics:
                 if name not in limit_topics:
@@ -494,8 +495,8 @@ class TopicStack:
                 raise RevupUsageException(f"Can't specify more than one uploader for topic {name}!")
 
             relative_topic = ""
-            if force_relative_chain and seen_topics:
-                relative_topic = list(seen_topics)[-1]
+            if force_relative_chain and last_topic is not None:
+                relative_topic = last_topic
             elif len(topic.tags[TAG_RELATIVE]) > 1:
                 raise RevupUsageException(
                     "Can't specify more than 1 relative topic per topic! Got"
@@ -507,21 +508,12 @@ class TopicStack:
                 # all the base branches for the relative topic. However it can't specify
                 # any base branches the relative topic doesn't have.
                 relative_topic = min(topic.tags[TAG_RELATIVE])
-                if relative_topic not in seen_topics:
-                    if relative_topic in self.topics:
-                        # Relative topics can have interleaved commits, however the first commit of
-                        # the relative topic must come before the first commit of this topic. This
-                        # prevents cycles of relatives.
-                        raise RevupUsageException(
-                            f"Topic '{name}' is relative to '{relative_topic}' but doesn't appear"
-                            " after it"
-                        )
-                    else:
-                        logging.warning(
-                            f"Relative topic '{relative_topic}' not found in stack, assuming it was"
-                            " merged"
-                        )
-                        relative_topic = ""
+                if relative_topic not in self.topics:
+                    logging.warning(
+                        f"Relative topic '{relative_topic}' not found in stack, assuming it was"
+                        " merged"
+                    )
+                    relative_topic = ""
 
             if self.repo_info and self.fork_info and self.fork_info.owner != self.repo_info.owner:
                 if len(topic.tags[TAG_RELATIVE_BRANCH]) > 1:
@@ -563,7 +555,8 @@ class TopicStack:
             if auto_add_users in ("a2r", "both"):
                 topic.tags[TAG_REVIEWER].update(topic.tags[TAG_ASSIGNEE])
 
-            seen_topics[name] = topic
+            # Track the last actually used topic for the relative-chain feature
+            last_topic = name
 
         if limit_topics:
             for name in limit_topics:
