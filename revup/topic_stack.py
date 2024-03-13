@@ -28,14 +28,23 @@ from revup.types import (
 # https://docs.github.com/en/get-started/using-git/dealing-with-special-characters-in-branch-and-tag-names
 RE_BRANCH_ALLOWED = re.compile(r"^[\w\d_\.\/-]+$")
 
+BRANCH_FORMAT_STRATEGIES = {
+    "user+branch": "{uploader}/revup/{base_branch}/{topic}",
+    "user": "{uploader}/revup/{topic}",
+    "branch": "revup/{base_branch}/{topic}",
+    "none": "revup/{topic}",
+}
 
-def format_remote_branch(uploader: str, base_branch: str, topic: str) -> str:
+
+def format_remote_branch(uploader: str, base_branch: str, topic: str, branch_format: str) -> str:
     """
     Branches are named so that it is clear that they are made by revup
     and can be force pushed at any time, and to minimize collision with
     manually created branches.
     """
-    return f"{uploader}/revup/{base_branch}/{topic}"
+    return BRANCH_FORMAT_STRATEGIES[branch_format].format(
+        uploader=uploader, base_branch=base_branch, topic=topic
+    )
 
 
 RE_TAGS = re.compile(r"^(?P<tagname>[a-zA-Z\-]+):(?P<tagvalue>.*)$", re.MULTILINE)
@@ -49,6 +58,7 @@ TAG_RELATIVE = "relative"
 TAG_RELATIVE_BRANCH = "relative-branch"
 TAG_UPLOADER = "uploader"
 TAG_UPDATE_PR_BODY = "update-pr-body"
+TAG_BRANCH_FORMAT = "branch-format"
 VALID_TAGS = {
     TAG_BRANCH,
     TAG_LABEL,
@@ -59,6 +69,7 @@ VALID_TAGS = {
     TAG_TOPIC,
     TAG_UPLOADER,
     TAG_UPDATE_PR_BODY,
+    TAG_BRANCH_FORMAT,
 }
 
 RE_COMMIT_LABEL = re.compile(r"^(?P<label1>[a-zA-Z\-_0-9]+):.*|^\[(?P<label2>[a-zA-Z\-_0-9]+)\].*")
@@ -504,6 +515,15 @@ class TopicStack:
                         f"Invalid tags for update-pr-body: {topic.tags[TAG_UPDATE_PR_BODY]}"
                     )
 
+            if TAG_BRANCH_FORMAT in topic.tags:
+                if (
+                    len(topic.tags[TAG_BRANCH_FORMAT]) > 1
+                    or min(topic.tags[TAG_BRANCH_FORMAT]).lower() not in BRANCH_FORMAT_STRATEGIES
+                ):
+                    raise RevupUsageException(
+                        f"Invalid tags for branch-format: {topic.tags[TAG_BRANCH_FORMAT]}"
+                    )
+
             relative_topic = ""
             if force_relative_chain and last_topic is not None:
                 relative_topic = last_topic
@@ -573,7 +593,7 @@ class TopicStack:
                 if name not in self.topics:
                     logging.warning(f"Couldn't find any topic named {name}")
 
-    async def populate_relative_reviews(self, uploader: str) -> None:
+    async def populate_relative_reviews(self, uploader: str, branch_format: str) -> None:
         for name, topic in self.topological_topics():
             if topic.relative_topic:
                 if len(topic.tags[TAG_BRANCH]) == 0:
@@ -638,7 +658,16 @@ class TopicStack:
                     f" {topic.relative_topic.tags[TAG_UPLOADER] or '{}'}"
                 )
             topic_uploader = min(topic.tags[TAG_UPLOADER]) if topic.tags[TAG_UPLOADER] else uploader
-
+            topic_branch_format = (
+                min(topic.tags[TAG_BRANCH_FORMAT]).lower()
+                if TAG_BRANCH_FORMAT in topic.tags
+                else branch_format
+            )
+            if "branch" not in topic_branch_format and len(topic.tags[TAG_BRANCH]) > 1:
+                raise RevupUsageException(
+                    "Cannot use multiple branches if Branch-Format: does not "
+                    'include "branch", try overriding it for this topic'
+                )
             for branch in topic.tags[TAG_BRANCH]:
                 review = Review(topic)
                 # Track whether we need to query for the relative pr
@@ -663,7 +692,9 @@ class TopicStack:
                         review.base_ref = await self.git_ctx.to_commit_hash(relative_branch)
                     review.remote_base = self.git_ctx.remove_branch_prefix(relative_branch)
 
-                review.remote_head = format_remote_branch(topic_uploader, base_branch, name)
+                review.remote_head = format_remote_branch(
+                    topic_uploader, base_branch, name, topic_branch_format
+                )
 
                 topic.reviews[branch] = review
 
