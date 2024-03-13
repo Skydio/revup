@@ -16,6 +16,6 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
     )
 
     await topics.populate_topics()
-
+    await topics.populate_reviews()
     await topics.restack(args.topicless_last)
     return 0

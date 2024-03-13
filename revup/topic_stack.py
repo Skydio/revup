@@ -1280,7 +1280,7 @@ class TopicStack:
         in a single topic consolidated together.
         """
         to_pick = []
-        for topic in self.topics.values():
+        for _, topic in self.topological_topics():
             this_topic = []
             topic_is_empty = True
             for commit in topic.original_commits:
