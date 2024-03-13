@@ -74,6 +74,13 @@ multiple users to collaborate on the same PR. If uploader is specified, all
 relative topics must specify the same uploader. However a topic without a
 specified uploader can still be relative to a topic with one.
 
+**Branch-Format:**
+: Specifies how the remote branches get named, which mainly affects how names
+conflict. Default is "user+branch", which never conflicts, but does not allow
+retargeting a PR to a different base branch. "user" will allow retargeting, but
+will not allow multiple base branches. "branch" and "none" are also supported.
+This tag takes precedence over the config option.
+
 **Relative-Branch:**
 : Optionally specifies a relative branch that this review is targeted against.
 A relative branch is one that represents another user's work or PR, and is
@@ -118,9 +125,12 @@ branch as the base. See above section for definition of a base branch.
 definition of a relative branch.
 
 **--uploader**
-: Used as the username for naming remote branches. The branch syntax
-is {uploader}/revup/{basebranch}/{topic}. If not set value is taken
+: Used as the username for naming remote branches. If not set value is taken
 from the portion of "git config user.email" before the "@".
+
+**--branch-format**
+: Specify how branches are named. See the Branch-Format: tag section for
+options and their meaning.
 
 **--rebase, -r**
 : By default revup will not push changes if local commits are a pure
