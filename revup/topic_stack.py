@@ -1306,14 +1306,13 @@ class TopicStack:
         for example we take no action for merged prs but still print them out.
         """
         ret = 0
-        for _, topic in reversed(self.topics.items()):
-            for _, review in topic.reviews.items():
-                if (
-                    review.status in (PrStatus.NOCHANGE, PrStatus.MERGED)
-                    and review.push_status != PushStatus.PUSHED
-                ):
-                    continue
-                ret += 1
+        for _, _, _, review in self.all_reviews_iter():
+            if (
+                review.status in (PrStatus.NOCHANGE, PrStatus.MERGED)
+                and review.push_status != PushStatus.PUSHED
+            ):
+                continue
+            ret += 1
         return ret
 
     def print(self, skip_empty: bool) -> None:
