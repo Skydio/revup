@@ -272,6 +272,9 @@ async def main() -> int:
         "--user-aliases",
     )
     upload_parser.add_argument("--uploader")
+    upload_parser.add_argument(
+        "--branch-format", choices=["user+branch", "user", "branch", "none"], default="user+branch"
+    )
     upload_parser.add_argument("--pre-upload", "-p")
     upload_parser.add_argument("--relative-chain", "-c", action="store_true")
     upload_parser.add_argument("--auto-topic", "-a", action="store_true")
