@@ -66,7 +66,7 @@ async def invoke_editor_for_commit_msg(
 
     if cleanup_type == "strip":
         # Strip out comment lines
-        msg = re.sub(r"^{}.*$\n".format(comment_char), "", msg, flags=re.M)
+        msg = re.sub(r"^{}.*$\n?".format(comment_char), "", msg, flags=re.M)
     elif cleanup_type == "scissors":
         msg = msg.split(f"{comment_char} {CLEANUP_SCISSOR_LINE}")[0]
 
