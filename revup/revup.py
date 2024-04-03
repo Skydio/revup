@@ -206,7 +206,8 @@ async def github_connection(
             path=f"{fork_info.owner}/{fork_info.name}.git",
         )
         if args.github_oauth != "":
-            logging.debug("Used credential from git-credential")
+            logs.redact({args.github_oauth: "<GITHUB_OAUTH>"})
+            logging.debug("Used credential from git-credential {}".format(args.github_oauth))
 
     if not args.github_oauth:
         raise RevupUsageException(

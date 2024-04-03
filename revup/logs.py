@@ -72,3 +72,10 @@ def configure_logger(debug: bool, redactions: Dict[str, str]) -> None:
     root_logger = logging.getLogger()
     root_logger.addHandler(handler)
     root_logger.setLevel(logging.DEBUG if debug else logging.INFO)
+
+
+def redact(redactions: Dict[str, str]) -> None:
+    log_filter = logging.getLogger().handlers[0].filters[0]
+    assert isinstance(log_filter, RedactingFilter)
+    for k, v in redactions.items():
+        log_filter.redact(k, v)

@@ -828,7 +828,9 @@ class Credential:
     async def _run(self, subcommand: str, args: Dict[str, str]) -> Dict[str, str]:
         input_str = "\n".join(f"{k}={v}" for k, v in args.items())
         logging.debug("credential input:\n{}".format(input_str))
-        stdout_str = await self.git_ctx.git_stdout("credential", subcommand, input_str=input_str)
+        stdout_str = await self.git_ctx.git_stdout(
+            "credential", subcommand, input_str=input_str, quiet=True
+        )
         stdout_dict = {}
         for line in stdout_str.splitlines():
             if line == "":
