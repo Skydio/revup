@@ -203,7 +203,7 @@ async def github_connection(
         args.github_oauth = await git_ctx.credential(
             protocol="https",
             host=args.github_url,
-            path=f"/{fork_info.owner}/{fork_info.name}.git",
+            path=f"{fork_info.owner}/{fork_info.name}.git",
         )
         if args.github_oauth != "":
             logging.debug("Used credential from git-credential")
