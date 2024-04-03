@@ -178,6 +178,7 @@ class Shell:
         stdin: _HANDLE = None,
         stdout: _HANDLE = subprocess.PIPE,
         raiseonerror: bool = True,
+        quiet: bool = False,
     ) -> Tuple[int, str]:
         """
         Run a command specified by args, and return string representing
@@ -213,7 +214,7 @@ class Shell:
 
         _, out, err, ret = await asyncio.gather(*tasks)
 
-        ret = self.handle_sh_results(ret, out, err, stdout, raiseonerror, *args)
+        ret = self.handle_sh_results(ret, out, err, stdout, raiseonerror, quiet, *args)
         if not self.quiet:
             logging.debug("Took {}s".format(time.time() - start_time))
         return ret
@@ -230,6 +231,7 @@ class Shell:
         stdin: _HANDLE = None,
         stdout: _HANDLE = subprocess.PIPE,
         raiseonerror: bool = True,
+        quiet: bool = False,
     ) -> Tuple[int, str]:
         start_time = time.time()
         read, write = os.pipe()
@@ -254,7 +256,7 @@ class Shell:
         assert isinstance(out2, bytes)
 
         ret = self.handle_sh_results(
-            ret2 if ret1 == 0 else ret1, out2, err1 + err2, stdout, raiseonerror, *log_args
+            ret2 if ret1 == 0 else ret1, out2, err1 + err2, stdout, raiseonerror, quiet, *log_args
         )
         os.close(read)
         if not self.quiet:
@@ -268,13 +270,14 @@ class Shell:
         err: bytes,
         stdout: _HANDLE,
         raiseonerror: bool,
+        quiet: bool,
         *args: str,
     ) -> Tuple[int, str]:
         if returncode and err:
             logging.warning(err.decode(errors="backslashreplace"))
-        elif not self.quiet and err:
+        elif not (quiet or self.quiet) and err:
             logging.debug("# stderr:\n{}".format(err.decode(errors="backslashreplace")))
-        if not self.quiet and out:
+        if not (quiet or self.quiet) and out:
             logging.debug(
                 "{}{}".format(
                     ("# stdout:\n" if err else ""),
