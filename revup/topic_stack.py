@@ -1232,9 +1232,10 @@ class TopicStack:
                 continue
             review_title = review.pr_update.title or review.pr_info.title
             review_graph_text = REVIEW_GRAPH_FIRST_LINE + (
-                review_graph[review.remote_head][0]
-                .replace(f"{review.pr_info.url}", f"**{review.pr_info.url}**")
-                .replace(f"{review_title}", f"**{review_title}**")
+                review_graph[review.remote_head][0].replace(
+                    f"{review.pr_info.url} {review_title}",
+                    f"**{review.pr_info.url} {review_title}**",
+                )
             )
             if len(review.pr_info.comments) > review.review_graph_index:
                 if review_graph_text != review.pr_info.comments[review.review_graph_index].text:
