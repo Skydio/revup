@@ -258,6 +258,7 @@ async def main() -> int:
     upload_parser.add_argument("--rebase", "-r", action="store_true")
     upload_parser.add_argument("--skip-confirm", "-s", action="store_true")
     upload_parser.add_argument("--dry-run", "-d", action="store_true")
+    upload_parser.add_argument("--push-only", action="store_true")
     upload_parser.add_argument("--status", "-t", action="store_true")
     upload_parser.add_argument("--update-pr-body", action="store_true", default=True)
     upload_parser.add_argument("--create-local-branches", action="store_true")

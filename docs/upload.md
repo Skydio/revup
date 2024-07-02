@@ -6,7 +6,7 @@ revup upload - Modify or create code reviews.
 
 `revup [--verbose] [--keep-temp]`
 : `upload [--help] [--base-branch=<br>] [--relative-branch=<br>]`
-`[--rebase] [--relative-chain] [--skip-confirm] [--dry-run]`
+`[--rebase] [--relative-chain] [--skip-confirm] [--dry-run] [--push-only]`
 `[--status] [--no-cherry-pick] [--no-update-pr-body] [--review-graph]`
 `[--trim-tags] [--create-local-branches] [--patchsets] [--auto-add-users=<o>]`
 `[--labels=<labels>] [<topics>]`
@@ -161,6 +161,10 @@ customized to ensure lint checks pass before uploading.
 github. This means that changes are still cherry-picked if necessary, and
 the command can still fail if there are conflicts. This will also skip the
 confirmation step and only print topic info.
+
+**--push-only, -p**
+: Like --dry-run except this also pushes branches to the git remote, but
+does not issue any github queries or attempt rebase detection.
 
 **--status, -t**
 : Print out status info of pull requests for existing topics but don't attempt

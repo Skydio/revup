@@ -46,7 +46,7 @@ async def main(
             branch_format=args.branch_format,
         )
 
-    if not args.dry_run:
+    if not args.dry_run and not args.push_only:
         with get_console().status("Querying github…"):
             await topics.query_github()
             # Fetch uses the oid results from the query
@@ -69,7 +69,8 @@ async def main(
         topics.print(not args.verbose)
         return 0
 
-    topics.populate_update_info(args.update_pr_body)
+    if not args.push_only:
+        topics.populate_update_info(args.update_pr_body)
     if not args.skip_confirm and topics.num_reviews_changed() > 0:
         topics.print(not args.verbose)
         if git_ctx.sh.wait_for_confirmation():
@@ -96,6 +97,10 @@ async def main(
             await topics.populate_patchsets()
         # Must push refs after creating them. Includes the virtual diff branch for patchsets.
         await topics.push_git_refs(git_ctx.author, args.create_local_branches)
+
+    if args.push_only:
+        topics.print(not args.verbose)
+        return 0
 
     try:
         # Must create PRs after refs are pushed, and must update PRs after creating them.
