@@ -105,7 +105,7 @@ def make_toplevel_parser() -> RevupArgParser:
     revup_parser.add_argument("--git-path", default="")
     revup_parser.add_argument("--main-branch", default="main")
     revup_parser.add_argument("--base-branch-globs", default="")
-    revup_parser.add_argument("--git-version", default="2.39.0")
+    revup_parser.add_argument("--git-version", default="2.40.0")
     return revup_parser
 
 
