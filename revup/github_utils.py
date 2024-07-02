@@ -272,7 +272,8 @@ async def query_everything(
                     reviewers.add(revs["requestedReviewer"]["login"])
                     reviewer_ids.add(revs["requestedReviewer"]["id"])
             for revs in this_node["latestReviews"]["nodes"]:
-                if not revs["viewerDidAuthor"]:
+                # Ignore self reviews and bot reviews (without a login)
+                if not revs["viewerDidAuthor"] and "login" in revs["author"]:
                     reviewers.add(revs["author"]["login"])
                     reviewer_ids.add(revs["author"]["id"])
             for user in this_node["assignees"]["nodes"]:
