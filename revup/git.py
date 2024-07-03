@@ -55,6 +55,11 @@ GIT_DIFF_ARGS = [
     "-U1",
 ]
 
+GIT_ENV_NOCONFIG = {
+    "HOME": "/dev/null",
+    "GIT_CONFIG_NOSYSTEM": "1",
+}
+
 COMMON_MAIN_BRANCHES = ["main", "master"]  # Below logic assumes 2 values here
 
 
@@ -269,7 +274,13 @@ class Git:
         """
         return f"{self.repo_root}/.revup" if self.keep_temp else self.temp_dir.name
 
-    async def git(self, *args: str, **kwargs: Any) -> Tuple[int, str]:
+    async def git(
+        self,
+        *args: str,
+        no_config: bool = False,
+        env: Optional[Dict[str, str]] = None,
+        **kwargs: Any,
+    ) -> Tuple[int, str]:
         """
         Run a git command.  The returned stdout has trailing newlines stripped.
 
@@ -277,11 +288,16 @@ class Git:
             *args: Arguments to git
             **kwargs: Any valid kwargs for sh()
         """
+        git_env = {}
+        if no_config:
+            git_env.update(GIT_ENV_NOCONFIG)
+        if env is not None:
+            git_env.update(env)
 
         def _maybe_rstrip(s: Tuple[int, str]) -> Tuple[int, str]:
             return (s[0], s[1].rstrip())
 
-        return _maybe_rstrip(await self.sh.sh(*((self.git_path,) + args), **kwargs))
+        return _maybe_rstrip(await self.sh.sh(*((self.git_path,) + args), env=git_env, **kwargs))
 
     async def git_return_code(self, *args: str, **kwargs: Any) -> int:
         return (await self.git(raiseonerror=False, *args, **kwargs))[0]
@@ -596,6 +612,8 @@ class Git:
             await self.sh.piped_sh(
                 patch_source,
                 [self.git_path, "patch-id", "--verbatim"],
+                env1=GIT_ENV_NOCONFIG,
+                env2=GIT_ENV_NOCONFIG,
             )
         )[1].split()
         # If the diff is empty, patch id will return nothing. We just use that as the patch-id since
@@ -610,7 +628,9 @@ class Git:
         """
         Return the summary of the diff (files and lines changed)
         """
-        return (await self.git_stdout("diff", "--shortstat", parent, commit)).rstrip()
+        return (
+            await self.git_stdout("diff", "--shortstat", parent, commit, no_config=True)
+        ).rstrip()
 
     async def merge_tree_commit(
         self,
@@ -628,7 +648,7 @@ class Git:
             args.extend(["--merge-base", merge_base])
         args.extend([branch1, branch2])
 
-        ret, stdout = await self.git(*args, raiseonerror=False)
+        ret, stdout = await self.git(*args, no_config=True, raiseonerror=False)
 
         # See man page for git merge-tree for a complete breakdown of the output format
         sections = stdout.split("\0\0")
