@@ -558,20 +558,6 @@ class Git:
                 ret = c
         return ret
 
-    async def ls_files(
-        self, show_conflicts: bool = False, env: Optional[Dict[str, str]] = None
-    ) -> List[Tuple[GitTreeHash, int, str]]:
-        args = ["ls-files"]
-        if show_conflicts:
-            args.append("-u")
-        else:
-            args.append("-s")
-        raw = await self.git(*args, env=env)
-        return [
-            (GitTreeHash(m.group("hash")), int(m.group("stage")), m.group("path"))
-            for m in RE_LS_FILES_LINE.finditer(raw[1])
-        ]
-
     async def commit_tree(self, commit_info: CommitHeader) -> GitCommitHash:
         """
         Run git commit-tree with the args in commit_info.
@@ -634,19 +620,28 @@ class Git:
 
     async def merge_tree_commit(
         self,
-        branch1: GitCommitHash,
-        branch2: GitCommitHash,
+        tree1: GitCommitHash,
+        tree2: GitCommitHash,
         new_commit_info: CommitHeader,
-        merge_base: Optional[GitCommitHash] = None,
+        merge_base: GitCommitHash,
+        strategy: Optional[str] = None,
+        ignore_conflicts: bool = False,
     ) -> GitCommitHash:
         """
         Perform a combined git merge-tree and commit-tree, returning a git commit hash. Raises
         GitConflictException if there are conflicts while merging the trees.
         """
-        args = ["merge-tree", "--write-tree", "--messages", "-z"]
-        if merge_base:
-            args.extend(["--merge-base", merge_base])
-        args.extend([branch1, branch2])
+        args = [
+            "merge-tree",
+            "--write-tree",
+            "--messages",
+            "-z",
+            "--merge-base",
+            merge_base,
+        ]
+        if strategy is not None:
+            args.extend([f"-X{strategy}"])
+        args.extend([tree1, tree2])
 
         ret, stdout = await self.git(*args, no_config=True, raiseonerror=False)
 
@@ -655,7 +650,7 @@ class Git:
         subsections = [s.split("\0") for s in sections]
         tree_hash = GitTreeHash(subsections[0][0])
 
-        if ret == 0:
+        if ret == 0 or ignore_conflicts:
             new_commit_info.tree = tree_hash
             return await self.commit_tree(new_commit_info)
         elif ret == 1:
@@ -679,7 +674,7 @@ class Git:
                 i += num_paths + 3
             raise e
         else:
-            raise RuntimeError(f"Unexpected / unknown error in git merge-tree {ret}")
+            raise RuntimeError(f"Unexpected / unknown error in git {args} {ret}")
 
     async def dump_conflict(self, e: GitConflictException) -> None:
         """
@@ -769,58 +764,31 @@ class Git:
     ) -> GitCommitHash:
         """
         Return a commit (optionally on top of parent) that provides a way to get the diff from old
-        head to new head while accounting for the fact that new base might have been rebased since
-        old base. This new commit makes an effort to include only files that were actually changed,
-        while excluding files that were changed upstream as part of the rebase.
+        head to new head while accounting for the fact that the base might have been rebased
 
-        We do this by resetting any files that changed in the old_base->old_head diff to their
-        old_head versions in new_base. The returned tree will thus have the following properties
-        when diffed against new_head.
+        We do this by "cherry-picking" the old branch with git merge-tree, but providing -X ours as
+        the strategy. This provides a tree that looks like the new base with old changes applied.
+        For cases where the old changes don't apply cleanly, the ours strategy prevents conflicts by
+        taking the version in the old tree. Although this can be a bit confusing when looking at the
+        file as a whole, it provides a succinct way to view a difference between the old version and
+        new version.
 
-        For files not touched by old or new, ret->new_head won't show any diff. This is primarily
-        what allows us to exclude upstream files.
-        For files touched by both old and new, ret->new_head will show the entire old_head->new_head
-        diff. This will include upstream changes for these files, which are difficult to untangle.
-        For files not touched in old but touched by new (regardless of whether it existed in
-        old_base), diff will show new_base->new_head.
-        For files touched in old but not touched in new, there are 2 cases. If file exists in
-        new_base, diff will show old_head->new_base. If file doesn't exist in new_base, diff will
-        show old_head->(deleted) which isn't perfect since technically new_base->new_head did not
-        delete the file, but probably the least confusing of the alternatives of showing no diff and
-        showing the old_head->old_base diff.
+        Note that providing -X ours does not actually ensure the merge succeeds without conflicts,
+        since there can still be add / remove conflicts, file / dir / symlink conflicts, and mode
+        conflicts among other more subtle ones. We currently handle this by ignoring them and
+        committing whatever git has decided to leave in the tree. Since this is purely informative,
+        deciding what to display in these corner cases can be tweaked as needed.
         """
-        new_index: List[str] = []
-
-        # Transform diff-tree raw output to ls-files style output, taking only the new version
-        for m in RE_RAW_DIFF_TREE_LINE.finditer(
-            await self.git_stdout("diff-tree", "-r", "--no-commit-id", "--raw", old_base, old_head)
-        ):
-            new_index.append(f"{m.group('new_mode')} {m.group('new_hash')} 0\t{m.group('path')}")
-
-        if not new_index:
-            # No files were actually changed, so no diff needs to be applied to new_base
-            return new_base
-
-        temp_index_path = self.get_scratch_dir() + "/index.temp"
-        git_env = {
-            "GIT_INDEX_FILE": temp_index_path,
-        }
-        shutil.copy(f"{self.git_dir}/index", temp_index_path)
-        await self.git("reset", "-q", "--no-refresh", new_base, "--", ":/", env=git_env)
-        await self.git(
-            "update-index",
-            "--index-info",
-            input_str="\n".join(new_index),
-            env=git_env,
-        )
-
-        tree = GitTreeHash(await self.git_stdout("write-tree", env=git_env))
-        new_commit_info = CommitHeader(tree, [parent] if parent else [])
+        new_commit_info = CommitHeader(GitTreeHash(""), [parent] if parent else [])
         new_commit_info.commit_msg = (
-            f"revup virtual diff target\n\n{old_base}\n{old_head}\n{new_base}\n{new_head}"
+            f"revup virtual diff target\n\n{old_base}\n{old_head}\n{new_base}\n{new_head}\n\n"
+            "revup uses this branch internally to generate github viewable diffs. The commits and "
+            "diffs between commits are not meaningful or useful."
         )
 
-        return await self.commit_tree(new_commit_info)
+        return await self.merge_tree_commit(
+            old_head, new_base, new_commit_info, old_base, "ours", ignore_conflicts=True
+        )
 
     async def soft_reset(self, new_commit: GitCommitHash, env: Dict) -> None:
         await self.git("reset", "--soft", new_commit, env=env)
