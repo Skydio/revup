@@ -746,8 +746,8 @@ class TopicStack:
                 and review.remote_base != review.pr_info.baseRef
             ):
                 logging.warning(
-                    f"Branch {review.remote_head} was merged into {review.pr_info.baseRef}"
-                    "instead of {review.remote_base} as expected!"
+                    f"Branch {review.remote_head} was merged into {review.pr_info.baseRef} "
+                    f"instead of {review.remote_base} as expected!"
                 )
                 # NOTE: This may not iteract well with the check at the end of create_commits
                 # but they are both corner cases and the worst that could happen is we fail to
