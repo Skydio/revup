@@ -138,10 +138,10 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
     """
 
     async def get_has_unstaged() -> bool:
-        return args.all and await git_ctx.git_return_code("diff", "--quiet") != 0
+        return args.all and await git_ctx.git_return_code("diff", "--no-renames", "--quiet") != 0
 
     has_staged, has_unstaged = await asyncio.gather(
-        git_ctx.git_return_code("diff", "--cached", "--quiet"),
+        git_ctx.git_return_code("diff", "--cached", "--no-renames", "--quiet"),
         get_has_unstaged(),
     )
 
