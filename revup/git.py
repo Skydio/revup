@@ -300,13 +300,13 @@ class Git:
             return GitHubRepoInfo(owner=owner, name=name)
         remote_url = ret[1]
         while True:
-            match = rf"^[^@]+@{github_url}:([^/]+)/([^.]+)(?:\.git)?$"
+            match = rf"^[^@]+@{github_url}:([^/]+)/(.+)(?<!\.git)(?:\.git)?$"
             m = re.match(match, remote_url)
             if m:
                 owner = m.group(1)
                 name = m.group(2)
                 break
-            search = rf"{github_url}/([^/]+)/([^.]+)"
+            search = rf"{github_url}/([^/]+)/(.+)(?<!\.git)(?:\.git)?$"
             m = re.search(search, remote_url)
             if m:
                 owner = m.group(1)
