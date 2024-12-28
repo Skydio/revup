@@ -647,16 +647,6 @@ class TopicStack:
                     f" {topic.tags[TAG_BRANCH]} for topic {name}"
                 )
 
-            if (
-                topic.tags[TAG_UPLOADER]
-                and topic.relative_topic
-                and topic.tags[TAG_UPLOADER] != topic.relative_topic.tags[TAG_UPLOADER]
-            ):
-                raise RevupUsageException(
-                    f"Topic {name} has uploader '{topic.tags[TAG_UPLOADER]}' while relative topic"
-                    f" {topic.relative_topic.name} has uploader"
-                    f" {topic.relative_topic.tags[TAG_UPLOADER] or '{}'}"
-                )
             topic_uploader = min(topic.tags[TAG_UPLOADER]) if topic.tags[TAG_UPLOADER] else uploader
             topic_branch_format = (
                 min(topic.tags[TAG_BRANCH_FORMAT]).lower()
