@@ -8,6 +8,7 @@ import time
 from typing import (
     IO,
     Any,
+    Callable,
     Coroutine,
     Dict,
     List,
@@ -45,7 +46,10 @@ def merge_dicts(x: Dict[K, V], y: Dict[K, V]) -> Dict[K, V]:
 
 
 async def process_stream(
-    proc_stream: Optional[asyncio.StreamReader], setting: _HANDLE, default_stream: IO[str]
+    proc_stream: Optional[asyncio.StreamReader],
+    setting: _HANDLE,
+    default_stream: IO[str],
+    transform: Optional[Callable],
 ) -> bytes:
     # The things we do for logging...
     #
@@ -69,13 +73,15 @@ async def process_stream(
         except asyncio.IncompleteReadError as e:
             line = e.partial
         if not line:
-            if isinstance(setting, int) and setting != -1:
+            if isinstance(setting, int) and setting not in (-1, subprocess.PIPE, subprocess.STDOUT):
                 os.close(setting)
             break
+        if transform:
+            line = transform(line)
         if setting == subprocess.PIPE:
             output.append(line)
         elif setting == subprocess.STDOUT:
-            sys.stdout.buffer.write(line)
+            logging.info(line.decode("utf-8").strip())
         elif isinstance(setting, int) and setting != -1:
             os.write(setting, line)
         elif setting is None:
@@ -137,6 +143,7 @@ class Shell:
         input_str: Optional[str] = None,
         stdin: _HANDLE = None,
         stdout: _HANDLE = subprocess.PIPE,
+        output_transform: Optional[Callable] = None,
     ) -> Tuple[
         Coroutine[Any, Any, None],
         Coroutine[Any, Any, bytes],
@@ -163,8 +170,8 @@ class Shell:
 
         return (
             feed_input(ret.stdin, input_str),
-            process_stream(ret.stdout, stdout, sys.stdout),
-            process_stream(ret.stderr, stderr, sys.stderr),
+            process_stream(ret.stdout, stdout, sys.stdout, output_transform),
+            process_stream(ret.stderr, stderr, sys.stderr, output_transform),
             ret.wait(),
         )
 
@@ -179,6 +186,7 @@ class Shell:
         stdout: _HANDLE = subprocess.PIPE,
         raiseonerror: bool = True,
         quiet: bool = False,
+        output_transform: Optional[Callable] = None,
     ) -> Tuple[int, str]:
         """
         Run a command specified by args, and return string representing
@@ -210,6 +218,7 @@ class Shell:
             input_str=input_str,
             stdin=stdin,
             stdout=stdout,
+            output_transform=output_transform,
         )
 
         _, out, err, ret = await asyncio.gather(*tasks)
