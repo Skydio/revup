@@ -1029,7 +1029,15 @@ class TopicStack:
                 self.git_ctx.remote_name,
                 *push_targets,
             ]
-            await self.git_ctx.git(*push_args, stderr=subprocess.PIPE)
+            await self.git_ctx.git(
+                *push_args,
+                stdout=subprocess.STDOUT,
+                stderr=subprocess.STDOUT,
+                # Hide the remote output that says "Create a pull request for '' on GitHub"
+                output_transform=lambda l: (
+                    b"" if (l.startswith(b"remote: ") and self.git_ctx.sh.quiet) else l
+                ),
+            )
 
     async def query_github(self) -> None:
         """
