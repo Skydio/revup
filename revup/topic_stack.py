@@ -1039,7 +1039,7 @@ class TopicStack:
                 self.git_ctx.remote_name,
                 *push_targets,
             ]
-            await self.git_ctx.git(*push_args, stderr=subprocess.PIPE)
+            await self.git_ctx.git(*push_args)
 
     async def query_github(self) -> None:
         """
