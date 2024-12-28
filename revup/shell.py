@@ -69,13 +69,13 @@ async def process_stream(
         except asyncio.IncompleteReadError as e:
             line = e.partial
         if not line:
-            if isinstance(setting, int) and setting != -1:
+            if isinstance(setting, int) and setting not in (-1, subprocess.PIPE, subprocess.STDOUT):
                 os.close(setting)
             break
         if setting == subprocess.PIPE:
             output.append(line)
         elif setting == subprocess.STDOUT:
-            sys.stdout.buffer.write(line)
+            logging.info(line)
         elif isinstance(setting, int) and setting != -1:
             os.write(setting, line)
         elif setting is None:
