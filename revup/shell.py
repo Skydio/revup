@@ -69,7 +69,7 @@ async def process_stream(
         except asyncio.IncompleteReadError as e:
             line = e.partial
         if not line:
-            if isinstance(setting, int) and setting != -1:
+            if isinstance(setting, int) and setting not in (-1, subprocess.PIPE, subprocess.STDOUT):
                 os.close(setting)
             break
         if setting == subprocess.PIPE:
