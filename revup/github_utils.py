@@ -24,8 +24,8 @@ class PrInfo:
 
     baseRef: str
     headRef: str
-    baseRefOid: GitCommitHash
-    headRefOid: GitCommitHash
+    baseRefOid: Optional[GitCommitHash]
+    headRefOid: Optional[GitCommitHash]
     body: str
     title: str
     id: str = ""
@@ -181,12 +181,10 @@ async def query_everything(
                 state
                 url
                 baseRefName
-                headRefOid
                 body
                 title
                 isDraft
-                updatedAt
-                commits (first: 1) {{
+                baseCommit: commits(first: 1) {{
                     nodes {{
                         commit {{
                             parents (first: 1) {{
@@ -194,6 +192,13 @@ async def query_everything(
                                     oid
                                 }}
                             }}
+                        }}
+                    }}
+                }}
+                headCommit: commits(last: 1) {{
+                    nodes {{
+                        commit {{
+                            oid
                         }}
                     }}
                 }}
@@ -279,15 +284,20 @@ async def query_everything(
             for user in this_node["assignees"]["nodes"]:
                 assignees.add(user["login"])
                 assignee_ids.add(user["id"])
-            headRefOid = this_node["headRefOid"]
-            # Github's "baseRefOid" in the api field returns the ToT commit for the base ref
-            # which isn't what we want, since that commit may not exist locally. Instead
-            # we get the parent of the first commit, which is the base ref it was actually
-            # uploaded against.
+
+            # The plain headRef and baseRef fields return the latest commit id associated with
+            # that branch name which may be newer than the PR itself if it was merged. We want
+            # the ids of the commits actually last associated with the PR, which we query from
+            # the commit list. This can also mean they are None if the PR has 0 commits.
+            headRefOid = (
+                this_node["headCommit"]["nodes"][0]["commit"]["oid"]
+                if this_node["headCommit"]["nodes"]
+                else None
+            )
             baseRefOid = (
-                headRefOid
-                if not this_node["commits"]["nodes"]
-                else this_node["commits"]["nodes"][0]["commit"]["parents"]["nodes"][0]["oid"]
+                this_node["baseCommit"]["nodes"][0]["commit"]["parents"]["nodes"][0]["oid"]
+                if this_node["baseCommit"]["nodes"]
+                else None
             )
 
             comments = []
