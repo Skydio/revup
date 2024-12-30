@@ -328,6 +328,8 @@ class TopicStack:
             or not self.repo_info
             or not self.fork_info
             or review.pr_info is None
+            or review.pr_info.headRefOid is None
+            or review.pr_info.baseRefOid is None
             or review.base_ref is None
         ):
             return None
@@ -748,6 +750,12 @@ class TopicStack:
                 # but they are both corner cases and the worst that could happen is we fail to
                 # recreate the pr (but warn anyway).
                 review.status = PrStatus.NEW
+                review.pr_info = None
+
+            if review.pr_info and (not review.pr_info.baseRefOid or not review.pr_info.headRefOid):
+                logging.warning(f"Branch {review.remote_head} was merged but has no commits!")
+                review.status = PrStatus.NEW
+                review.pr_info = None
 
             if review.pr_info is not None and review.remote_base != review.pr_info.baseRef:
                 logging.debug(
@@ -766,6 +774,9 @@ class TopicStack:
                 # This is a new pr, no need to check patch ids
                 review.is_pure_rebase = False
             else:
+                assert (
+                    review.pr_info.baseRefOid is not None and review.pr_info.headRefOid is not None
+                )
                 if not topic.patch_ids:
                     # Lazily load patch ids for the topic.
                     topic.patch_ids = await asyncio.gather(
@@ -993,8 +1004,10 @@ class TopicStack:
 
         to_fetch = set()
         for _, _, _, review in self.all_reviews_iter():
-            if review.pr_info is not None and not await self.git_ctx.is_branch_or_commit(
-                review.pr_info.headRefOid
+            if (
+                review.pr_info is not None
+                and review.pr_info.headRefOid is not None
+                and not await self.git_ctx.is_branch_or_commit(review.pr_info.headRefOid)
             ):
                 to_fetch.add(review.pr_info.headRefOid)
 
