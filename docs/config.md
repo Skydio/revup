@@ -4,7 +4,7 @@ revup config - Edit revup configuration files.
 
 # SYNOPSIS
 
-`revup config [--help] [--repo] <flag> <value>`
+`revup config [--help] [--repo] [--delete] <flag> <value>`
 
 # DESCRIPTION
 
@@ -39,6 +39,9 @@ revup will warn if attempting to specify them directly.
 **--repo, -r**
 : If specified, configuration value will be written to the file in the current
 repo. Otherwise, value will apply globally.
+
+**--delete, -d**
+: Delete the value with the given flag key.
 
 # EXAMPLES
 
