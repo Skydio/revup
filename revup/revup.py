@@ -198,7 +198,7 @@ async def main() -> int:
         add_help=False,
     )
     toolkit_parser = subparsers.add_parser(
-        "toolkit", description="Test various subfunctionalities."
+        "toolkit", description="Exercise various subfunctionalities."
     )
 
     # Intentionally does not contain config or toolkit parsers since the those are not configurable

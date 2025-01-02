@@ -11,9 +11,6 @@ from revup.types import RevupUsageException
 
 
 class RevupArgParser(argparse.ArgumentParser):
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-
     def add_argument(self, *args: Any, **kwargs: Any) -> argparse.Action:
         """
         For each boolean store_true action, add a corresponding "no" store_false action
@@ -26,8 +23,6 @@ class RevupArgParser(argparse.ArgumentParser):
             for option_string in action.option_strings:
                 if option_string.startswith("--"):
                     no_options.append("--no-" + option_string[2:])
-                elif option_string.startswith("-"):
-                    no_options.append("-n" + option_string[1:])
 
             if no_options:
                 action = _StoreFalseAction(
@@ -169,7 +164,9 @@ def config_main(conf: Config, args: argparse.Namespace, all_parsers: List[RevupA
     if args.delete:
         value = None
         if args.value:
-            raise RevupUsageException("Can't provide a value when using --delete")
+            raise RevupUsageException(
+                f"Can't provide a value {args.value} for {command}.{key} when using --delete"
+            )
     elif args.value:
         value = args.value
         if command == "revup" and key == "github_oauth":
