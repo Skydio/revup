@@ -18,6 +18,7 @@ from revup.github_utils import PrComment, PrInfo, PrUpdate
 from revup.types import (
     GitCommitHash,
     GitConflictException,
+    GitTreeHash,
     RevupConflictException,
     RevupUsageException,
 )
@@ -255,6 +256,9 @@ class TopicStack:
 
     # Whether populate() was successfully called
     populated: bool = False
+
+    # Whether to work around github issues with reordering by pushing a dummy commit
+    use_reordering_workaround = False
 
     def all_reviews_iter(self) -> Iterator[Tuple[str, Topic, str, Review]]:
         """
@@ -699,6 +703,7 @@ class TopicStack:
         changes that are already merged, or where push can be skipped due to being rebases or
         being identical.
         """
+        num_reordered_changes = 0
         for _, topic, base_branch, review in self.all_reviews_iter():
             # If the relative branch already merged, reset the remote base directly to the base
             # branch.
@@ -743,6 +748,19 @@ class TopicStack:
                 # but they are both corner cases and the worst that could happen is we fail to
                 # recreate the pr (but warn anyway).
                 review.status = PrStatus.NEW
+
+            if review.pr_info is not None and review.remote_base != review.pr_info.baseRef:
+                logging.debug(
+                    f"Retargeting pr {review.remote_head} from {review.pr_info.baseRef}"
+                    f" to {review.remote_base}"
+                )
+                num_reordered_changes += 1
+                if num_reordered_changes > 1:
+                    # The logic for correctly detecting whether changes have been reordered can be
+                    # complex. To simplify, we'll apply the workaround if at least 2 PRs had a base
+                    # change. This is relatively rare, and the only cost is another 1s spent on an
+                    # extra git push operation.
+                    self.use_reordering_workaround = True
 
             if review.pr_info is None:
                 # This is a new pr, no need to check patch ids
@@ -1003,7 +1021,23 @@ class TopicStack:
             if review.push_status != PushStatus.PUSHED or review.status == PrStatus.MERGED:
                 continue
 
-            push_targets.append(f"{review.new_commits[-1]}:refs/heads/{review.remote_head}")
+            commit_to_push = review.new_commits[-1]
+            if self.use_reordering_workaround:
+                # When reordering a relative series of PRs, github isn't able to handle the push,
+                # which happens via git, atomically with the api update, which happens through
+                # http. As a result github always sees the push happen first with the old relative
+                # structure. When reordering, a PR that is being moved forward might briefly look
+                # like it contains no new commits, causing github to either mark it merged or
+                # closed. To prevent this, we add an empty dummy commit onto the branch before
+                # pushing, do the update, then push once more to remove the dummy commit. This
+                # only happens when we detect the it is needed, so does not add much overhead.
+                dummy_commit = git.CommitHeader(
+                    GitTreeHash(f"{commit_to_push}^{{tree}}"), [commit_to_push]
+                )
+                dummy_commit.commit_msg = "Revup dummy commit to work around reordering issues"
+                commit_to_push = await self.git_ctx.commit_tree(dummy_commit)
+
+            push_targets.append(f"{commit_to_push}:refs/heads/{review.remote_head}")
 
             if create_local_branches:
                 await self.git_ctx.git(

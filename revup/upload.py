@@ -110,6 +110,11 @@ async def main(
                 # Review graph requires populated PR urls from creation
                 topics.populate_review_graph()
             await topics.update_prs()
+
+        if topics.use_reordering_workaround:
+            topics.use_reordering_workaround = False
+            with get_console().status("Pushing again to work around reordering issues…"):
+                await topics.push_git_refs(git_ctx.author, False)
     finally:
         topics.print(not args.verbose)
     return 0
