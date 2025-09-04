@@ -150,19 +150,27 @@ async def github_connection(
         )
 
     if not args.github_oauth:
-        args.github_oauth = await git_ctx.credential(
-            protocol="https",
-            host=args.github_url,
-            path=f"{fork_info.owner}/{fork_info.name}.git",
-        )
-        if args.github_oauth != "":
+        # Try environment variables first
+        args.github_oauth = os.environ.get("GITHUB_TOKEN")
+        if args.github_oauth:
             logs.redact({args.github_oauth: "<GITHUB_OAUTH>"})
-            logging.debug("Used credential from git-credential {}".format(args.github_oauth))
+            logging.debug("Used GitHub token from environment variable")
+        else:
+            # Fall back to git credential helper
+            args.github_oauth = await git_ctx.credential(
+                protocol="https",
+                host=args.github_url,
+                path=f"{fork_info.owner}/{fork_info.name}.git",
+            )
+            if args.github_oauth:
+                logs.redact({args.github_oauth: "<GITHUB_OAUTH>"})
+                logging.debug("Used credential from git-credential")
 
     if not args.github_oauth:
         raise RevupUsageException(
             "No Github OAuth token found! "
-            "Login with 'gh auth login' "
+            "Set the GITHUB_TOKEN environment variable, "
+            "login with 'gh auth login', "
             "or make one at https://github.com/settings/tokens/new "
             "(revup needs full repo permissions) "
             "then set it with `revup config github_oauth`."
