@@ -200,6 +200,10 @@ async def main() -> int:
         "cherry-pick",
         add_help=False,
     )
+    reset_parser = subparsers.add_parser(
+        "reset",
+        add_help=False,
+    )
     amend_parser = subparsers.add_parser("amend", aliases=["commit"], add_help=False)
     config_parser = subparsers.add_parser(
         "config",
@@ -214,6 +218,7 @@ async def main() -> int:
         revup_parser,
         amend_parser,
         cherry_pick_parser,
+        reset_parser,
         restack_parser,
         upload_parser,
     ]
@@ -266,6 +271,8 @@ async def main() -> int:
     cherry_pick_parser.add_argument("--help", "-h", action=HelpAction, nargs=0)
     cherry_pick_parser.add_argument("branch", nargs=1)
     cherry_pick_parser.add_argument("--base-branch", "-b")
+
+    reset_parser.add_argument("--help", "-h", action=HelpAction, nargs=0)
 
     config_parser.add_argument("--help", "-h", action=HelpAction, nargs=0)
     config_parser.add_argument("flag", nargs=1)
@@ -388,6 +395,11 @@ async def main() -> int:
         from revup import restack
 
         return await restack.main(args=args, git_ctx=git_ctx)
+
+    elif args.cmd == "reset":
+        from revup import reset
+
+        return await reset.main(args, git_ctx)
 
     async with github_connection(args=args, git_ctx=git_ctx, conf=conf) as (
         github_ep,

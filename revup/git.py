@@ -796,6 +796,13 @@ class Git:
         # TODO: only strictly needs to drop entries for HEAD
         self.clear_cache()
 
+    async def hard_reset(self, new_commit: str, env: Optional[Dict[str, str]] = None) -> None:
+        """
+        Perform a hard reset to the given commit.
+        """
+        await self.git("reset", "--hard", new_commit, env=env or {})
+        self.clear_cache()
+
     async def credential(self, **kwargs: str) -> str:
         cred = Credential(self, description=kwargs)
         await cred.fill()
