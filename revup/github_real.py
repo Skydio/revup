@@ -1,3 +1,4 @@
+import datetime
 import json
 import logging
 import time
@@ -73,6 +74,17 @@ class RealGitHubEndpoint(github.GitHubEndpoint):
         ) as resp:
             logging.debug(
                 "Response status: {} took {}".format(resp.status, time.time() - start_time)
+            )
+            ratelimit_reset = resp.headers.get("x-ratelimit-reset")
+            if ratelimit_reset is not None:
+                reset_timestamp = datetime.datetime.fromtimestamp(int(ratelimit_reset)).isoformat()
+            else:
+                reset_timestamp = "Unknown"
+            logging.debug(
+                "Ratelimit: {} remaining, resets at {}".format(
+                    resp.headers.get("x-ratelimit-remaining"),
+                    reset_timestamp,
+                )
             )
             try:
                 r = await resp.json()
