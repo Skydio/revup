@@ -245,12 +245,15 @@ async def main() -> int:
     )
     upload_parser.add_argument("--uploader")
     upload_parser.add_argument(
-        "--branch-format", choices=["user+branch", "user", "branch", "none"], default="user+branch"
+        "--branch-format",
+        choices=["user+branch", "user", "branch", "none", "underscore-divisors"],
+        default="user+branch",
     )
     upload_parser.add_argument("--pre-upload", "-p")
     upload_parser.add_argument("--relative-chain", "-c", action="store_true")
     upload_parser.add_argument("--auto-topic", "-a", action="store_true")
     upload_parser.add_argument("--head", default="HEAD")
+    upload_parser.add_argument("--gt-track", action="store_true")
 
     restack_parser.add_argument("--topicless-last", "-t", action="store_true")
 

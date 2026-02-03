@@ -9,7 +9,7 @@ revup upload - Modify or create code reviews.
 `[--rebase] [--relative-chain] [--skip-confirm] [--dry-run] [--push-only]`
 `[--status] [--no-cherry-pick] [--no-update-pr-body] [--review-graph]`
 `[--trim-tags] [--create-local-branches] [--patchsets] [--auto-add-users=<o>]`
-`[--labels=<labels>] [<topics>]`
+`[--labels=<labels>] [--gt-track] [<topics>]`
 
 # DESCRIPTION
 
@@ -215,3 +215,10 @@ If "a2r", add users from the Assignees tag as reviewers. If "both", do both of t
 
 **--head**
 : The name or commit of the branch to be uploaded. If not specified, defaults to HEAD.
+
+**--gt-track**
+: Run `gt track` (Graphite CLI) on all branches in the stack after pushing. Branches
+are tracked in topological order (parents before children) so Graphite can understand
+the full stack structure. This allows you to use revup's multi-branch workflow while
+also having Graphite track and display your stacks. Local branches are created as
+needed for `gt track` to work.
