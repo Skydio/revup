@@ -4,7 +4,7 @@ from typing import Optional
 
 from rich import get_console
 
-from revup import git, github, github_utils, topic_stack
+from revup import git, github, github_utils, graphite, topic_stack
 from revup.types import RevupShellException
 
 
@@ -18,6 +18,12 @@ async def main(
     """
     Handles the "upload" command.
     """
+    # gt-track mode requires rebase and underscore-divisors branch format
+    if args.gt_track:
+        args.rebase = True
+        args.branch_format = "underscore-divisors"
+        await graphite.pre_upload_rebase(git_ctx, args)
+
     topics = topic_stack.TopicStack(
         git_ctx,
         args.base_branch,
@@ -97,6 +103,10 @@ async def main(
             await topics.populate_patchsets()
         # Must push refs after creating them. Includes the virtual diff branch for patchsets.
         await topics.push_git_refs(git_ctx.author, args.create_local_branches)
+
+    if args.gt_track:
+        with get_console().status("Running gt track on stack branches…"):
+            await graphite.run_gt_track(git_ctx, topics)
 
     if args.push_only:
         topics.print(not args.verbose)

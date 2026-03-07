@@ -34,6 +34,8 @@ BRANCH_FORMAT_STRATEGIES = {
     "user": "{uploader}/revup/{topic}",
     "branch": "revup/{base_branch}/{topic}",
     "none": "revup/{topic}",
+    # Underscore-based versions (required for Graphite compatibility)
+    "underscore-divisors": "{uploader}__revup__{base_branch}__{topic}",
 }
 
 
