@@ -311,7 +311,7 @@ class Git:
         """
         owner = ""
         name = ""
-        ret = await self.git("remote", "get-url", remote_name, raiseonerror=False)
+        ret = await self.git("config", "--get", f"remote.{remote_name}.url", raiseonerror=False)
         if ret[0] != 0:
             return GitHubRepoInfo(owner=owner, name=name)
         remote_url = ret[1]
