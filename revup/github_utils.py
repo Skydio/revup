@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 from dataclasses import dataclass, field
@@ -5,7 +6,7 @@ from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple
 
 from revup import github
 from revup.git import GitHubRepoInfo
-from revup.types import GitCommitHash, RevupGithubException
+from revup.types import GitCommitHash, RevupGithubException, RevupRequestException
 
 MAX_COMMENTS_TO_QUERY = 3
 
@@ -429,18 +430,59 @@ async def create_pull_requests(
             pr.url = result["url"]
 
 
+TRANSIENT_STATUSES = frozenset({500, 502, 503, 504})
+RETRYABLE_GRAPHQL_ERRORS = frozenset({"RESOURCE_LIMITS_EXCEEDED"})
+
+
+async def _refresh_new_comment_ids(github_ep: github.GitHubEndpoint, prs: List[PrUpdate]) -> None:
+    """Re-query comments for PRs with new (id=None) comments.
+
+    If a comment with matching body text already exists on the PR, set its
+    id in-place so the next mutation attempt uses updateIssueComment instead
+    of addComment, avoiding duplicates.
+    """
+    prs_with_new = [pr for pr in prs if any(c.id is None for c in pr.comments)]
+    if not prs_with_new:
+        return
+
+    node_args = get_args_dict([pr.id for pr in prs_with_new], "node")
+    node_outs = get_result_args(len(prs_with_new), "node_out")
+    arg_str = ", ".join(get_args_declaration(node_args, "ID!"))
+
+    query_str = "".join(
+        len(prs_with_new)
+        * [
+            "{}: node(id: ${}) {{ ... on PullRequest {{ comments(first: "
+            + str(MAX_COMMENTS_TO_QUERY)
+            + ") {{ nodes {{ body id }} }} }} }},"
+        ]
+    )
+    query_str = query_str.format(*zip_and_flatten(node_outs, node_args.keys()))
+    query = f"query ({arg_str}) {{ {query_str} }}"
+
+    result = await github_ep.graphql(query, max_retries=1, **node_args)
+
+    for pr, out in zip(prs_with_new, node_outs):
+        pr_data = result["data"][out]
+        existing = pr_data.get("comments", {}).get("nodes", []) if pr_data else []
+        existing_by_body = {c["body"]: c["id"] for c in existing}
+        for comment in pr.comments:
+            if comment.id is None and comment.text in existing_by_body:
+                comment.id = existing_by_body[comment.text]
+                logging.info("Comment already posted on PR, converting to edit")
+
+
 async def update_pull_requests(github_ep: github.GitHubEndpoint, prs: List[PrUpdate]) -> None:
     """
     Update the given pull request contents, and also add reviewers and labels.
     """
+    # Build non-comment parts once (all idempotent, safe to retry as-is).
     inputs = []
     labels = []
     reviewers = []
     assignees = []
     convert_to_draft = []
     convert_from_draft = []
-    comments = []
-    edit_comments = []
     for pr in prs:
         update_dict = {
             "clientMutationId": "revup",
@@ -487,20 +529,6 @@ async def update_pull_requests(github_ep: github.GitHubEndpoint, prs: List[PrUpd
                     "pullRequestId": pr.id,
                 })
 
-        for c in pr.comments:
-            if c.id:
-                edit_comments.append({
-                    "body": c.text,
-                    "clientMutationId": "revup",
-                    "id": c.id,
-                })
-            else:
-                comments.append({
-                    "body": c.text,
-                    "clientMutationId": "revup",
-                    "subjectId": pr.id,
-                })
-
     inputs_args = get_args_dict(inputs, "pr")
     prs_out = get_result_args(len(inputs), "pr_out")
 
@@ -518,23 +546,6 @@ async def update_pull_requests(github_ep: github.GitHubEndpoint, prs: List[PrUpd
 
     from_draft_args = get_args_dict(convert_from_draft, "from_d")
     from_draft_out = get_result_args(len(convert_from_draft), "from_d_out")
-
-    comments_args = get_args_dict(comments, "com")
-    comments_out = get_result_args(len(comments), "com_out")
-
-    edit_comments_args = get_args_dict(edit_comments, "edit_com")
-    edit_comments_out = get_result_args(len(edit_comments), "edit_com_out")
-
-    arg_str = ", ".join(
-        get_args_declaration(inputs_args, "UpdatePullRequestInput!")
-        + get_args_declaration(labels_args, "AddLabelsToLabelableInput!")
-        + get_args_declaration(reviewers_args, "RequestReviewsInput!")
-        + get_args_declaration(assignees_args, "AddAssigneesToAssignableInput!")
-        + get_args_declaration(to_draft_args, "ConvertPullRequestToDraftInput!")
-        + get_args_declaration(from_draft_args, "MarkPullRequestReadyForReviewInput!")
-        + get_args_declaration(comments_args, "AddCommentInput!")
-        + get_args_declaration(edit_comments_args, "UpdateIssueCommentInput!")
-    )
 
     update_str = "".join(
         len(inputs)
@@ -603,57 +614,140 @@ async def update_pull_requests(github_ep: github.GitHubEndpoint, prs: List[PrUpd
     )
     from_draft_str = from_draft_str.format(*zip_and_flatten(from_draft_out, from_draft_args.keys()))
 
-    add_comments_str = "".join(
-        len(comments_args)
-        * [
-            """
+    idempotent_str = (
+        f"{update_str}{request_reviewers_str}{assignees_str}{add_labels_str}"
+        f"{to_draft_str}{from_draft_str}"
+    )
+    idempotent_decl = (
+        get_args_declaration(inputs_args, "UpdatePullRequestInput!")
+        + get_args_declaration(labels_args, "AddLabelsToLabelableInput!")
+        + get_args_declaration(reviewers_args, "RequestReviewsInput!")
+        + get_args_declaration(assignees_args, "AddAssigneesToAssignableInput!")
+        + get_args_declaration(to_draft_args, "ConvertPullRequestToDraftInput!")
+        + get_args_declaration(from_draft_args, "MarkPullRequestReadyForReviewInput!")
+    )
+    idempotent_kwargs = {
+        **inputs_args,
+        **reviewers_args,
+        **assignees_args,
+        **labels_args,
+        **to_draft_args,
+        **from_draft_args,
+    }
+
+    # Retry loop with idempotent addComment handling: between attempts,
+    # re-query PR comments so already-posted ones become edits, not adds.
+    max_retries = 3
+    base_delay = 1.0
+    for attempt in range(max_retries):
+        # Build comment parts from current pr.comments state.
+        # After _refresh_new_comment_ids, previously-new comments that were
+        # already posted will have their id set, routing them to
+        # updateIssueComment instead of addComment.
+        comments = []
+        edit_comments = []
+        for pr in prs:
+            for c in pr.comments:
+                if c.id:
+                    edit_comments.append({
+                        "body": c.text,
+                        "clientMutationId": "revup",
+                        "id": c.id,
+                    })
+                else:
+                    comments.append({
+                        "body": c.text,
+                        "clientMutationId": "revup",
+                        "subjectId": pr.id,
+                    })
+
+        comments_args = get_args_dict(comments, "com")
+        comments_out = get_result_args(len(comments), "com_out")
+
+        edit_comments_args = get_args_dict(edit_comments, "edit_com")
+        edit_comments_out = get_result_args(len(edit_comments), "edit_com_out")
+
+        arg_str = ", ".join(
+            idempotent_decl
+            + get_args_declaration(comments_args, "AddCommentInput!")
+            + get_args_declaration(edit_comments_args, "UpdateIssueCommentInput!")
+        )
+
+        add_comments_str = "".join(
+            len(comments_args)
+            * [
+                """
             {}: addComment(input: ${}) {{
                 clientMutationId
             }},"""
-        ]
-    )
-    add_comments_str = add_comments_str.format(*zip_and_flatten(comments_out, comments_args.keys()))
+            ]
+        )
+        add_comments_str = add_comments_str.format(
+            *zip_and_flatten(comments_out, comments_args.keys())
+        )
 
-    edit_comments_str = "".join(
-        len(edit_comments_args)
-        * [
-            """
+        edit_comments_str = "".join(
+            len(edit_comments_args)
+            * [
+                """
             {}: updateIssueComment(input: ${}) {{
                 clientMutationId
             }},"""
-        ]
-    )
-    edit_comments_str = edit_comments_str.format(
-        *zip_and_flatten(edit_comments_out, edit_comments_args.keys())
-    )
+            ]
+        )
+        edit_comments_str = edit_comments_str.format(
+            *zip_and_flatten(edit_comments_out, edit_comments_args.keys())
+        )
 
-    # Have any add comment mutations first in order to ensure that comments are at the top of the PR
-    mutation_str = f"""
+        # addComment first so new comments appear at the top of the PR
+        mutation_str = f"""
         mutation ({arg_str}) {{
-            {add_comments_str}{update_str}{request_reviewers_str}{assignees_str}{add_labels_str}\
-{to_draft_str}{from_draft_str}{edit_comments_str}
+            {add_comments_str}{idempotent_str}{edit_comments_str}
         }}"""
 
-    try:
-        await github_ep.graphql(
-            mutation_str,
-            **comments_args,
-            **inputs_args,
-            **reviewers_args,
-            **assignees_args,
-            **labels_args,
-            **to_draft_args,
-            **from_draft_args,
-            **edit_comments_args,
-        )
-    except RevupGithubException as e:
-        if "timeout" in e.message:
-            logging.warning(
-                "Github update request timed out! Most likely this is a false alarm and changes"
-                " actually succeeded. You may want to rerun this command to verify."
+        try:
+            await github_ep.graphql(
+                mutation_str,
+                max_retries=1,
+                **comments_args,
+                **idempotent_kwargs,
+                **edit_comments_args,
             )
-        else:
-            raise e
+            return
+        except RevupRequestException as e:
+            if e.status not in TRANSIENT_STATUSES or attempt >= max_retries - 1:
+                raise
+            delay = base_delay * (2**attempt)
+            logging.warning(
+                "GitHub returned %d, retrying in %ss (attempt %d/%d)",
+                e.status,
+                delay,
+                attempt + 1,
+                max_retries,
+            )
+        except RevupGithubException as e:
+            if "timeout" in e.message:
+                logging.warning(
+                    "Github update request timed out! Most likely this is a false alarm and changes"
+                    " actually succeeded. You may want to rerun this command to verify."
+                )
+                return
+            retryable = set(e.types) & RETRYABLE_GRAPHQL_ERRORS
+            if not retryable or attempt >= max_retries - 1:
+                raise
+            delay = base_delay * (2**attempt)
+            logging.warning(
+                "GitHub GraphQL error (%s), retrying in %ss (attempt %d/%d)",
+                ", ".join(retryable),
+                delay,
+                attempt + 1,
+                max_retries,
+            )
+
+        # Before retrying, check which new comments were already posted
+        # and update their IDs so the next attempt edits instead of adds.
+        await _refresh_new_comment_ids(github_ep, prs)
+        await asyncio.sleep(delay)
 
 
 RE_PR_URL = re.compile(
