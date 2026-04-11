@@ -1,11 +1,24 @@
+import argparse
 import logging
+import os
 import re
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple
+from typing import (
+    Any,
+    AsyncGenerator,
+    Dict,
+    Iterable,
+    List,
+    NamedTuple,
+    Optional,
+    Set,
+    Tuple,
+)
 
-from revup import github
+from revup import config, git, github, logs
 from revup.git import GitHubRepoInfo
-from revup.types import GitCommitHash, RevupGithubException
+from revup.types import GitCommitHash, RevupGithubException, RevupUsageException
 
 MAX_COMMENTS_TO_QUERY = 3
 
@@ -682,3 +695,106 @@ def parse_pull_request_url(pull_request: str) -> GitHubPullRequestParams:
     name = m.group("name")
     number = int(m.group("number"))
     return GitHubPullRequestParams(github_url=github_url, owner=owner, name=name, number=number)
+
+
+@asynccontextmanager
+async def github_connection(
+    git_ctx: git.Git, args: argparse.Namespace, conf: config.Config
+) -> AsyncGenerator[Tuple, None]:
+    from revup import github_real
+
+    repo_info = await git_ctx.get_github_repo_info(
+        github_url=args.github_url, remote_name=args.remote_name
+    )
+
+    if not repo_info.owner or not repo_info.name:
+        raise RevupUsageException(
+            f'Configured remote "{args.remote_name}" does not '
+            "point to the a github repository! "
+            "You can set it manually by running "
+            f"`git remote set-url {args.remote_name} git@github.com:{{OWNER}}/{{PROJECT}}` "
+            f"or change the configured remote in {conf.config_path}/"
+        )
+
+    fork_info = repo_info
+    if args.fork_name and args.fork_name != args.remote_name:
+        fork_info = await git_ctx.get_github_repo_info(
+            github_url=args.github_url, remote_name=args.fork_name
+        )
+
+    if not fork_info.owner or not fork_info.name:
+        raise RevupUsageException(
+            f'Configured remote fork "{args.fork_info}" does not '
+            "point to the a github repository! "
+            "You can set it manually by running "
+            f"`git remote set-url {args.fork_info} git@github.com:{{OWNER}}/{{PROJECT}}` "
+            f"or change the configured remote in {conf.config_path}."
+        )
+
+    if repo_info.name != fork_info.name:
+        raise RevupUsageException(
+            f'Configured remote fork "{args.fork_info}" is not '
+            f"the same repo as the remote {args.remote_info}."
+        )
+
+    if not args.github_oauth:
+        # Try environment variables first
+        args.github_oauth = os.environ.get("GITHUB_TOKEN")
+        if args.github_oauth:
+            logs.redact({args.github_oauth: "<GITHUB_OAUTH>"})
+            logging.debug("Used GitHub token from environment variable")
+        else:
+            # Fall back to git credential helper
+            args.github_oauth = await git_ctx.credential(
+                protocol="https",
+                host=args.github_url,
+                path=f"{fork_info.owner}/{fork_info.name}.git",
+            )
+            if args.github_oauth:
+                logs.redact({args.github_oauth: "<GITHUB_OAUTH>"})
+                logging.debug("Used credential from git-credential")
+
+    if not args.github_oauth:
+        raise RevupUsageException(
+            "No Github OAuth token found! "
+            "Set the GITHUB_TOKEN environment variable, "
+            "login with 'gh auth login', "
+            "or make one at https://github.com/settings/tokens/new "
+            "(revup needs full repo permissions) "
+            "then set it with `revup config github_oauth`."
+        )
+
+    github_ep = github_real.RealGitHubEndpoint(
+        oauth_token=args.github_oauth, proxy=args.proxy, github_url=args.github_url
+    )
+    try:
+        yield github_ep, repo_info, fork_info
+    finally:
+        await github_ep.close()
+
+
+async def query_pr_by_number(
+    github_ep: github.GitHubEndpoint,
+    owner: str,
+    name: str,
+    number: int,
+) -> Tuple[str, str]:
+    """
+    Query a pull request by number and return (headRefName, baseRefName).
+    """
+    result = await github_ep.graphql(
+        query="""\
+query ($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      headRefName
+      baseRefName
+    }
+  }
+}""",
+        owner=owner,
+        name=name,
+        number=number,
+    )
+    pr = result["data"]["repository"]["pullRequest"]
+    return pr["headRefName"], pr["baseRefName"]

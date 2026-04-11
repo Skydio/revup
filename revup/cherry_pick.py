@@ -1,8 +1,34 @@
 import argparse
 import logging
+from typing import Tuple
 
-from revup import git
+from revup import config, git
+from revup.github_utils import (
+    RE_PR_URL,
+    github_connection,
+    parse_pull_request_url,
+    query_pr_by_number,
+)
 from revup.types import GitCommitHash, GitTreeHash, RevupUsageException
+
+
+async def resolve_pr_url(
+    args: argparse.Namespace, git_ctx: git.Git, conf: config.Config, pr_url: str
+) -> Tuple[str, str]:
+    """
+    Resolve a PR URL to (head_ref, base_ref) by querying the GitHub API.
+    """
+    pr_params = parse_pull_request_url(pr_url)
+    async with github_connection(args=args, git_ctx=git_ctx, conf=conf) as (
+        github_ep,
+        _repo_info,
+        _fork_info,
+    ):
+        head_ref, base_ref = await query_pr_by_number(
+            github_ep, pr_params.owner, pr_params.name, pr_params.number
+        )
+    logging.info(f"Resolved PR #{pr_params.number} to branch '{head_ref}' based on '{base_ref}'")
+    return head_ref, base_ref
 
 
 async def find_branch_fetch_if_necessary(git_ctx: git.Git, branch_to_pick: str) -> str:
@@ -40,15 +66,23 @@ async def find_branch_fetch_if_necessary(git_ctx: git.Git, branch_to_pick: str) 
     return branch_to_pick
 
 
-async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
+async def main(args: argparse.Namespace, git_ctx: git.Git, conf: config.Config) -> int:
     """
     Squash the given branch's changes into a single commit, and cherry-pick
     that commit onto the local branch.
     """
-    branch_to_pick = await find_branch_fetch_if_necessary(git_ctx, args.branch[0])
+    branch_arg = args.branch_or_pr_url[0]
+    explicit_base = args.base_branch
 
-    if args.base_branch:
-        base_branch = await find_branch_fetch_if_necessary(git_ctx, args.base_branch)
+    if RE_PR_URL.match(branch_arg):
+        branch_arg, pr_base = await resolve_pr_url(args, git_ctx, conf, branch_arg)
+        if not explicit_base:
+            explicit_base = pr_base
+
+    branch_to_pick = await find_branch_fetch_if_necessary(git_ctx, branch_arg)
+
+    if explicit_base:
+        base_branch = await find_branch_fetch_if_necessary(git_ctx, explicit_base)
     else:
         base_branch = await git_ctx.get_best_base_branch(branch_to_pick, True)
 

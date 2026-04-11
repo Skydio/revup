@@ -5,7 +5,7 @@ revup cherry-pick - Squash and cherry-pick a branch.
 # SYNOPSIS
 
 `revup [--verbose]`
-: `cherry-pick [--help] [--base-branch=<base>] <branch>`
+: `cherry-pick [--help] [--base-branch=<base>] <branch | PR-URL>`
 
 # DESCRIPTION
 
@@ -25,9 +25,11 @@ for the user to resolve.
 
 # OPTIONS
 
-**`<branch>`**
-: The branch to cherry-pick. Must have some content difference from
-the base branch.
+**`<branch | PR-URL>`**
+: The branch to cherry-pick, or a GitHub pull request URL
+(e.g. `https://github.com/owner/repo/pull/123`). When a PR URL is
+given, the branch and base branch are derived from the pull request.
+Must have some content difference from the base branch.
 
 **--help, -h**
 : Show this help page.
@@ -41,3 +43,8 @@ branch as the base.
 Cherry-pick a feature branch that was previously on main to rc10.
 
 : $ `revup cherry-pick feature_br --base-branch main`
+
+Cherry-pick a branch from a GitHub pull request URL. The branch and
+base branch are resolved automatically from the PR.
+
+: $ `revup cherry-pick https://github.com/owner/repo/pull/123`
