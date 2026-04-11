@@ -7,12 +7,12 @@ import stat
 import subprocess
 import sys
 from builtins import FileNotFoundError
-from contextlib import asynccontextmanager
-from typing import Any, AsyncGenerator, List, Tuple
+from typing import Any, List
 
 import revup
 from revup import config, git, logs, shell
 from revup.config import RevupArgParser
+from revup.github_utils import github_connection
 from revup.types import RevupUsageException
 
 REVUP_CONFIG_ENV_VAR = "REVUP_CONFIG_PATH"
@@ -109,82 +109,6 @@ def dump_args(args: argparse.Namespace) -> None:
         logging.debug(json.dumps(vars(args), default=str, indent=2))
 
 
-@asynccontextmanager
-async def github_connection(
-    git_ctx: git.Git, args: argparse.Namespace, conf: config.Config
-) -> AsyncGenerator[Tuple, None]:
-    from revup import github_real
-
-    repo_info = await git_ctx.get_github_repo_info(
-        github_url=args.github_url, remote_name=args.remote_name
-    )
-
-    if not repo_info.owner or not repo_info.name:
-        raise RevupUsageException(
-            f'Configured remote "{args.remote_name}" does not '
-            "point to the a github repository! "
-            "You can set it manually by running "
-            f"`git remote set-url {args.remote_name} git@github.com:{{OWNER}}/{{PROJECT}}` "
-            f"or change the configured remote in {conf.config_path}/"
-        )
-
-    fork_info = repo_info
-    if args.fork_name and args.fork_name != args.remote_name:
-        fork_info = await git_ctx.get_github_repo_info(
-            github_url=args.github_url, remote_name=args.fork_name
-        )
-
-    if not fork_info.owner or not fork_info.name:
-        raise RevupUsageException(
-            f'Configured remote fork "{args.fork_info}" does not '
-            "point to the a github repository! "
-            "You can set it manually by running "
-            f"`git remote set-url {args.fork_info} git@github.com:{{OWNER}}/{{PROJECT}}` "
-            f"or change the configured remote in {conf.config_path}."
-        )
-
-    if repo_info.name != fork_info.name:
-        raise RevupUsageException(
-            f'Configured remote fork "{args.fork_info}" is not '
-            f"the same repo as the remote {args.remote_info}."
-        )
-
-    if not args.github_oauth:
-        # Try environment variables first
-        args.github_oauth = os.environ.get("GITHUB_TOKEN")
-        if args.github_oauth:
-            logs.redact({args.github_oauth: "<GITHUB_OAUTH>"})
-            logging.debug("Used GitHub token from environment variable")
-        else:
-            # Fall back to git credential helper
-            args.github_oauth = await git_ctx.credential(
-                protocol="https",
-                host=args.github_url,
-                path=f"{fork_info.owner}/{fork_info.name}.git",
-            )
-            if args.github_oauth:
-                logs.redact({args.github_oauth: "<GITHUB_OAUTH>"})
-                logging.debug("Used credential from git-credential")
-
-    if not args.github_oauth:
-        raise RevupUsageException(
-            "No Github OAuth token found! "
-            "Set the GITHUB_TOKEN environment variable, "
-            "login with 'gh auth login', "
-            "or make one at https://github.com/settings/tokens/new "
-            "(revup needs full repo permissions) "
-            "then set it with `revup config github_oauth`."
-        )
-
-    github_ep = github_real.RealGitHubEndpoint(
-        oauth_token=args.github_oauth, proxy=args.proxy, github_url=args.github_url
-    )
-    try:
-        yield github_ep, repo_info, fork_info
-    finally:
-        await github_ep.close()
-
-
 async def main() -> int:
     # Description / help text isn't given to the parser since the actual
     # help text is in the markdown files.
@@ -264,7 +188,7 @@ async def main() -> int:
     amend_parser.add_argument("--parse-refs", default=True, action="store_true")
 
     cherry_pick_parser.add_argument("--help", "-h", action=HelpAction, nargs=0)
-    cherry_pick_parser.add_argument("branch", nargs=1)
+    cherry_pick_parser.add_argument("branch_or_pr_url", nargs=1)
     cherry_pick_parser.add_argument("--base-branch", "-b")
 
     config_parser.add_argument("--help", "-h", action=HelpAction, nargs=0)
@@ -366,7 +290,7 @@ async def main() -> int:
     elif args.cmd == "cherry-pick":
         from revup import cherry_pick
 
-        return await cherry_pick.main(args=args, git_ctx=git_ctx)
+        return await cherry_pick.main(args=args, git_ctx=git_ctx, conf=conf)
 
     elif args.cmd in ["commit", "amend"]:
         from revup import amend
