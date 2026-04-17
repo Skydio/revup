@@ -19,7 +19,8 @@ def _main() -> None:
         # https://stackoverflow.com/questions/63860576/asyncio-event-loop-is-closed-when-using-asyncio-run
         # Since revup makes use of subprocess, we can't use WindowsSelectorEventLoopPolicy.
         # Instead, we can manually create the event loop and prevent the RuntimeError on shutdown.
-        sys.exit(asyncio.get_event_loop().run_until_complete(main()))
+        loop = asyncio.new_event_loop()
+        sys.exit(loop.run_until_complete(main()))
     except RevupUsageException as e:
         logging.error(str(e))
         sys.exit(2)
