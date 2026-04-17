@@ -109,6 +109,18 @@ def dump_args(args: argparse.Namespace) -> None:
         logging.debug(json.dumps(vars(args), default=str, indent=2))
 
 
+async def _run_complete(args: argparse.Namespace) -> int:
+    if args.shell:
+        completions_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "completions")
+        ext = {"bash": "revup.bash", "zsh": "revup.zsh", "fish": "revup.fish"}[args.shell]
+        path = os.path.join(completions_dir, ext)
+        with open(path) as f:
+            print(f.read(), end="")
+        return 0
+
+    return 0
+
+
 async def main() -> int:
     # Description / help text isn't given to the parser since the actual
     # help text is in the markdown files.
@@ -132,6 +144,8 @@ async def main() -> int:
     toolkit_parser = subparsers.add_parser(
         "toolkit", description="Exercise various subfunctionalities."
     )
+    complete_parser = subparsers.add_parser("_complete")
+    complete_parser.add_argument("--shell", choices=["bash", "zsh", "fish"])
 
     # Intentionally does not contain config or toolkit parsers since the those are not configurable
     all_parsers: List[RevupArgParser] = [
@@ -260,6 +274,10 @@ async def main() -> int:
 
     # Do an initial parsing pass, which handles HelpAction
     args = revup_parser.parse_args()
+
+    if args.cmd == "_complete":
+        return await _run_complete(args)
+
     conf = await get_config()
 
     # Run config before setting the config, in order to avoid the situation where a broken
