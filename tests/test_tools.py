@@ -22,10 +22,7 @@ def mock_revup(args, user_input) -> str:
     with mock.patch.object(sys, "argv", args):
         with mock.patch.object(builtins, "input", lambda x: user_input.pop(0)):
             with mock.patch("sys.stdout", new_callable=io.StringIO):
-                # Ensure we finish main.
-                loop = asyncio.get_event_loop()
-                coroutine = revup.main()
-                loop.run_until_complete(coroutine)
+                asyncio.run(revup.main())
                 output = sys.stdout.getvalue()
 
     # This is the stdout output.
