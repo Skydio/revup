@@ -7,10 +7,18 @@ import stat
 import subprocess
 import sys
 from builtins import FileNotFoundError
-from typing import Any, List
+from typing import Any, List, Tuple
+
+import argcomplete
 
 import revup
 from revup import config, git, logs, shell
+from revup.completion import (
+    ShellType,
+    install_completion,
+    maybe_prompt_user_for_completions,
+    topic_completer,
+)
 from revup.config import RevupArgParser
 from revup.github_utils import github_connection
 from revup.types import RevupUsageException
@@ -56,6 +64,10 @@ def make_toplevel_parser() -> RevupArgParser:
     revup_parser.add_argument("--main-branch", default="main")
     revup_parser.add_argument("--base-branch-globs", default="")
     revup_parser.add_argument("--git-version", default="2.43.0")
+    for s in ShellType:
+        revup_parser.add_argument(
+            f"--prompt-completion-{s.value}", default="", help=argparse.SUPPRESS
+        )
     return revup_parser
 
 
@@ -109,9 +121,9 @@ def dump_args(args: argparse.Namespace) -> None:
         logging.debug(json.dumps(vars(args), default=str, indent=2))
 
 
-async def main() -> int:
-    # Description / help text isn't given to the parser since the actual
-    # help text is in the markdown files.
+def build_parser() -> Tuple[RevupArgParser, List[RevupArgParser]]:
+    """Build the argument parser and all subparsers. Must be called before the event loop starts
+    so that argcomplete completers can use asyncio.run()."""
     revup_parser = make_toplevel_parser()
     subparsers = revup_parser.add_subparsers(dest="cmd", required=True, parser_class=RevupArgParser)
 
@@ -132,6 +144,11 @@ async def main() -> int:
     toolkit_parser = subparsers.add_parser(
         "toolkit", description="Exercise various subfunctionalities."
     )
+    install_completion_parser = subparsers.add_parser("install-completion")
+    install_completion_parser.add_argument(
+        "--shell", type=ShellType, choices=ShellType, required=True
+    )
+    install_completion_parser.add_argument("--rc-file")
 
     # Intentionally does not contain config or toolkit parsers since the those are not configurable
     all_parsers: List[RevupArgParser] = [
@@ -148,7 +165,8 @@ async def main() -> int:
         p.add_argument("--base-branch", "-b")
         p.add_argument("--relative-branch", "-e")
 
-    upload_parser.add_argument("topics", nargs="*")
+    topics_arg = upload_parser.add_argument("topics", nargs="*")
+    topics_arg.completer = topic_completer  # type: ignore[attr-defined]
     upload_parser.add_argument("--rebase", "-r", action="store_true")
     upload_parser.add_argument("--skip-confirm", "-s", action="store_true")
     upload_parser.add_argument("--dry-run", "-d", action="store_true")
@@ -178,7 +196,8 @@ async def main() -> int:
 
     restack_parser.add_argument("--topicless-last", "-t", action="store_true")
 
-    amend_parser.add_argument("ref_or_topic", nargs="?")
+    ref_or_topic_arg = amend_parser.add_argument("ref_or_topic", nargs="?")
+    ref_or_topic_arg.completer = topic_completer  # type: ignore[attr-defined]
     amend_parser.add_argument("--edit", "-s", default=True, action="store_true")
     amend_parser.add_argument("--insert", "-i", action="store_true")
     amend_parser.add_argument("--drop", "-d", action="store_true")
@@ -258,9 +277,23 @@ async def main() -> int:
         help="Print the titles for all commits within a topic",
     )
 
+    argcomplete.autocomplete(
+        revup_parser,
+        always_complete_options=False,
+        exclude=revup_parser.collect_excluded_completions(),
+    )
+
+    return revup_parser, all_parsers
+
+
+async def main(revup_parser: RevupArgParser, all_parsers: List[RevupArgParser]) -> int:
     # Do an initial parsing pass, which handles HelpAction
     args = revup_parser.parse_args()
     conf = await get_config()
+
+    if args.cmd == "install-completion":
+        logs.configure_logger(False, {})
+        return install_completion(args.shell, args.rc_file, conf)
 
     # Run config before setting the config, in order to avoid the situation where a broken
     # config prevents you from running config at all.
@@ -278,6 +311,11 @@ async def main() -> int:
         debug=args.verbose,
         redactions={args.github_oauth: "<GITHUB_OAUTH>"} if args.github_oauth else {},
     )
+
+    if args.cmd != "toolkit":
+        # Don't leak the prompt into util output as these are used in other scripts
+        maybe_prompt_user_for_completions(conf)
+
     dump_args(args)
 
     git_ctx = await get_git(args)

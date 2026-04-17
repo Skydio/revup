@@ -125,6 +125,10 @@ given branch relative to its base branch, then cherry-pick it.
 **revup toolkit**
 : Various low-level subfunctionalities intended for advanced users or scripts.
 
+**revup install-completion**
+: Install argcomplete-based shell completions by appending a registration
+line to the shell's rc file.
+
 # ISSUES
 
 See https://github.com/Skydio/revup/issues for a list of known issues.

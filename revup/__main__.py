@@ -1,8 +1,9 @@
+# PYTHON_ARGCOMPLETE_OK
 import asyncio
 import logging
 import sys
 
-from revup.revup import main
+from revup.revup import build_parser, main
 from revup.types import (
     RevupConflictException,
     RevupGithubException,
@@ -19,8 +20,9 @@ def _main() -> None:
         # https://stackoverflow.com/questions/63860576/asyncio-event-loop-is-closed-when-using-asyncio-run
         # Since revup makes use of subprocess, we can't use WindowsSelectorEventLoopPolicy.
         # Instead, we can manually create the event loop and prevent the RuntimeError on shutdown.
+        revup_parser, all_parsers = build_parser()
         loop = asyncio.new_event_loop()
-        sys.exit(loop.run_until_complete(main()))
+        sys.exit(loop.run_until_complete(main(revup_parser, all_parsers)))
     except RevupUsageException as e:
         logging.error(str(e))
         sys.exit(2)
