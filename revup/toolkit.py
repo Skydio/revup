@@ -6,6 +6,14 @@ from revup.topic_stack import TopicStack
 from revup.types import RevupUsageException
 
 
+async def get_topics(
+    git_ctx: git.Git, base_branch: str = "", relative_branch: str = ""
+) -> TopicStack:
+    topics = TopicStack(git_ctx, base_branch, relative_branch)
+    await topics.populate_topics()
+    return topics
+
+
 async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
     """
     Miscellaneous commands exposing subunits of possibly useful functionality.
@@ -61,8 +69,7 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
         await git_ctx.verify_branch_or_commit(args.branch[0])
         print(await git_ctx.get_best_base_branch(args.branch[0], allow_self=args.allow_self))
     elif args.toolkit_cmd == "list-topics":
-        topics = TopicStack(git_ctx, args.base_branch, args.relative_branch)
-        await topics.populate_topics()
+        topics = await get_topics(git_ctx, args.base_branch, args.relative_branch)
         for topic in topics.topics.values():
             print(topic.name)
             if args.commit_ids or args.titles:

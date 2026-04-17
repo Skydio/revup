@@ -22,7 +22,8 @@ def mock_revup(args, user_input) -> str:
     with mock.patch.object(sys, "argv", args):
         with mock.patch.object(builtins, "input", lambda x: user_input.pop(0)):
             with mock.patch("sys.stdout", new_callable=io.StringIO):
-                asyncio.run(revup.main())
+                revup_parser, all_parsers = revup.build_parser()
+                asyncio.run(revup.main(revup_parser, all_parsers))
                 output = sys.stdout.getvalue()
 
     # This is the stdout output.
