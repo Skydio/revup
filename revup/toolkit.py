@@ -61,6 +61,8 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
         await git_ctx.verify_branch_or_commit(args.branch[0])
         print(await git_ctx.get_best_base_branch(args.branch[0], allow_self=args.allow_self))
     elif args.toolkit_cmd == "list-topics":
+        # Shell completion scripts (revup/completions/) call this to get topic names.
+        # Keep the bare topic-name-per-line output format stable.
         topics = TopicStack(git_ctx, args.base_branch, args.relative_branch)
         await topics.populate_topics()
         for topic in topics.topics.values():
