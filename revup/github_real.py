@@ -11,7 +11,6 @@ from revup import github
 from revup.types import RevupGithubException, RevupRequestException
 
 TRANSIENT_STATUSES = frozenset({500, 502, 503, 504})
-RETRYABLE_GRAPHQL_ERRORS = frozenset({"RESOURCE_LIMITS_EXCEEDED"})
 
 
 class RealGitHubEndpoint(github.GitHubEndpoint):
@@ -47,10 +46,12 @@ class RealGitHubEndpoint(github.GitHubEndpoint):
         oauth_token: str,
         github_url: str,
         proxy: Optional[str] = None,
+        batch_size: int = github.DEFAULT_BATCH_SIZE,
     ):
         self.github_url = github_url
         self.oauth_token = oauth_token
         self.proxy = proxy
+        self.batch_size = batch_size
         self.graphql_endpoint = f"https://api.{github_url}/graphql"
 
     async def close(self) -> None:
@@ -137,15 +138,5 @@ class RealGitHubEndpoint(github.GitHubEndpoint):
                 if e.status not in TRANSIENT_STATUSES:
                     raise
                 msg = "GitHub returned {}".format(e.status)
-                if not await self._should_retry(attempt, max_retries, base_delay, msg):
-                    raise
-            except RevupGithubException as e:
-                retryable = set(e.types) & RETRYABLE_GRAPHQL_ERRORS
-                if not retryable:
-                    raise
-                # TODO: For RESOURCE_LIMITS_EXCEEDED, use x-ratelimit-reset header
-                # instead of exponential backoff - either wait until reset time or
-                # fail immediately if the wait would be too long.
-                msg = "GitHub GraphQL error ({})".format(", ".join(retryable))
                 if not await self._should_retry(attempt, max_retries, base_delay, msg):
                     raise

@@ -122,16 +122,14 @@ def zip_and_flatten(l1: Iterable[str], l2: Iterable[str]) -> List[str]:
     return ret
 
 
-async def query_everything(
+async def _query_repo_users_labels(
     github_ep: github.GitHubEndpoint,
     repo_info: GitHubRepoInfo,
-    head_refs: List[str],
     user_ids: List[str],
     labels: List[str],
     teams: List[Tuple[str, str]],
 ) -> Tuple[
     str,
-    List[Optional[PrInfo]],
     Dict[str, str],
     Dict[str, str],
     Dict[str, str],
@@ -139,12 +137,12 @@ async def query_everything(
     Dict[str, Optional[Set[str]]],
 ]:
     """
-    This function does all necessary graphql querying in one request. This dramatically reduces the
-    amount of time spent on querying.
+    Query the repository node id along with user, label, and team lookups in a single request.
+
+    None of these scale with the number of PRs, so they're fetched once rather than per PR batch.
 
     Returns a tuple of:
     - Repository node id
-    - List of pull requests, one for each ref in head_refs. None if a pr wasn't found for that ref
     - Dict of user_ids as given to graphql node ids
     - Dict of user_ids as given to their full login name
     - Dict of labels to their graphql node ids
@@ -152,39 +150,23 @@ async def query_everything(
     - Dict of "org/slug" team refs to their member logins. None if the team has more members
       than we fetched (meaning membership is unknown / incomplete).
     """
-    head_refs_args = get_args_dict(head_refs, "pr")
     user_id_args = get_args_dict(user_ids, "user")
     label_args = get_args_dict(labels, "label")
     team_org_args = get_args_dict([t[0] for t in teams], "team_org")
     team_slug_args = get_args_dict([t[1] for t in teams], "team_slug")
 
-    prs_out = get_result_args(len(head_refs), "pr_out")
     user_id_out = get_result_args(len(user_ids), "user_out")
     label_out = get_result_args(len(labels), "label_out")
     team_out = get_result_args(len(teams), "team_out")
 
     arg_str = ", ".join(
-        get_args_declaration(head_refs_args, "String!")
-        + get_args_declaration(user_id_args, "String!")
+        get_args_declaration(user_id_args, "String!")
         + get_args_declaration(label_args, "String!")
         + get_args_declaration(team_org_args, "String!")
         + get_args_declaration(team_slug_args, "String!")
     )
-
-    # NOTE: There are possible limitations here because we depend on PRs being returned in order of
-    # OPEN prs, followed by MERGED prs in the order that they merged. github doesn't offer these
-    # options and it is excessively expensive to always fetch multiple prs and order them on this
-    # side. For now we hope that the most relevant PR will have the most recent update time.
-    request_str = "".join(
-        len(head_refs)
-        * [
-            "{}: pullRequests (headRefName: ${}, states: [OPEN, MERGED], first: 1, "
-            "orderBy: {{direction: DESC, field:UPDATED_AT}}) {{"
-            "...PrResult"
-            "}},"
-        ]
-    )
-    request_str = request_str.format(*zip_and_flatten(prs_out, head_refs_args.keys()))
+    if arg_str:
+        arg_str = ", " + arg_str
 
     user_str = "".join(
         len(user_ids) * ["{}: assignableUsers (query: ${}, first: 25) {{...UserResult}},"]
@@ -202,16 +184,16 @@ async def query_everything(
             f"{{id, members(first: 100) {{nodes {{login}}, totalCount}}}}}},"
         )
 
-    multi_query_str = f"""
-        query GetPrResults($owner: String!, $name: String!, {arg_str}) {{
+    query_str = f"""
+        query ($owner: String!, $name: String!{arg_str}) {{
             repository(name: $name, owner: $owner) {{
                 id
-                {request_str}{user_str}{label_str}
+                {user_str}{label_str}
             }}
             {team_str}
         }}"""
     if user_str:
-        multi_query_str += """
+        query_str += """
         fragment UserResult on UserConnection {
             nodes {
                 login
@@ -220,13 +202,110 @@ async def query_everything(
             totalCount
         }"""
     if label_str:
-        multi_query_str += """
+        query_str += """
         fragment LabelResult on Label {
             id
             name
         }"""
-    if request_str:
-        multi_query_str += f"""
+
+    result = await github_ep.graphql(
+        query_str,
+        owner=repo_info.owner,
+        name=repo_info.name,
+        **user_id_args,
+        **label_args,
+        **team_org_args,
+        **team_slug_args,
+    )
+
+    repo_id = result["data"]["repository"]["id"]
+
+    names_to_ids: Dict[str, str] = {}
+    names_to_logins: Dict[str, str] = {}
+    for i, user_id in enumerate(user_ids):
+        this_node = result["data"]["repository"][user_id_out[i]]
+        if len(this_node["nodes"]) == 0:
+            logging.warning("No matching user found for {}".format(user_id))
+        else:
+            if this_node["totalCount"] > len(this_node["nodes"]):
+                logging.warning(
+                    "Too many matching users found for {}, try being more specific".format(user_id)
+                )
+            shortest_name = this_node["nodes"][0]["login"]
+            names_to_ids[user_id] = this_node["nodes"][0]["id"]
+            found_match = False
+            for user in this_node["nodes"]:
+                if len(user["login"]) <= len(shortest_name) and user["login"].startswith(user_id):
+                    shortest_name = user["login"]
+                    names_to_ids[user_id] = user["id"]
+                    names_to_logins[user_id] = user["login"]
+                    found_match = True
+            if not found_match:
+                logging.warning(
+                    "Couldn't find a prefixed match for {}, going with {} instead".format(
+                        user_id, shortest_name
+                    )
+                )
+
+    labels_to_ids: Dict[str, str] = {}
+    for i, label in enumerate(labels):
+        this_node = result["data"]["repository"][label_out[i]]
+        if this_node is not None:
+            labels_to_ids[label] = this_node["id"]
+        else:
+            logging.warning("Couldn't find an existing label named {}".format(label))
+
+    teams_to_ids: Dict[str, str] = {}
+    teams_to_members: Dict[str, Optional[Set[str]]] = {}
+    for i, (org, slug) in enumerate(teams):
+        team_node = result["data"][team_out[i]]
+        if team_node is not None and team_node["team"] is not None:
+            team_ref = f"{org}/{slug}"
+            teams_to_ids[team_ref] = team_node["team"]["id"]
+            members_node = team_node["team"]["members"]
+            member_logins = {m["login"] for m in members_node["nodes"]}
+            if members_node["totalCount"] > len(members_node["nodes"]):
+                # Team has more members than we fetched; we can't check membership reliably.
+                teams_to_members[team_ref] = None
+            else:
+                teams_to_members[team_ref] = member_logins
+        else:
+            logging.warning("Couldn't find a team matching {}/{}".format(org, slug))
+
+    return repo_id, names_to_ids, names_to_logins, labels_to_ids, teams_to_ids, teams_to_members
+
+
+async def _query_prs_batch(
+    github_ep: github.GitHubEndpoint,
+    repo_info: GitHubRepoInfo,
+    head_refs: List[str],
+) -> List[Optional[PrInfo]]:
+    head_refs_args = get_args_dict(head_refs, "pr")
+    prs_out = get_result_args(len(head_refs), "pr_out")
+
+    arg_str = ", ".join(get_args_declaration(head_refs_args, "String!"))
+
+    # NOTE: There are possible limitations here because we depend on PRs being returned in order of
+    # OPEN prs, followed by MERGED prs in the order that they merged. github doesn't offer these
+    # options and it is excessively expensive to always fetch multiple prs and order them on this
+    # side. For now we hope that the most relevant PR will have the most recent update time.
+    request_str = "".join(
+        len(head_refs)
+        * [
+            "{}: pullRequests (headRefName: ${}, states: [OPEN, MERGED], first: 1, "
+            "orderBy: {{direction: DESC, field:UPDATED_AT}}) {{"
+            "...PrResult"
+            "}},"
+        ]
+    )
+    request_str = request_str.format(*zip_and_flatten(prs_out, head_refs_args.keys()))
+
+    query_str = f"""
+        query ($owner: String!, $name: String!, {arg_str}) {{
+            repository(name: $name, owner: $owner) {{
+                {request_str}
+            }}
+        }}
         fragment PrResult on PullRequestConnection {{
             nodes {{
                 id
@@ -330,14 +409,10 @@ async def query_everything(
         }}"""
 
     pr_result = await github_ep.graphql(
-        multi_query_str,
+        query_str,
         owner=repo_info.owner,
         name=repo_info.name,
         **head_refs_args,
-        **user_id_args,
-        **label_args,
-        **team_org_args,
-        **team_slug_args,
     )
 
     prs: List[Optional[PrInfo]] = []
@@ -438,60 +513,55 @@ async def query_everything(
         else:
             prs.append(None)
 
-    names_to_ids = {}
-    names_to_logins = {}
-    for i, user_id in enumerate(user_ids):
-        this_node = pr_result["data"]["repository"][user_id_out[i]]
-        if len(this_node["nodes"]) == 0:
-            logging.warning("No matching user found for {}".format(user_id))
-        else:
-            if this_node["totalCount"] > len(this_node["nodes"]):
-                logging.warning(
-                    "Too many matching users found for {}, try being more specific".format(user_id)
-                )
-            shortest_name = this_node["nodes"][0]["login"]
-            names_to_ids[user_id] = this_node["nodes"][0]["id"]
-            found_match = False
-            for user in this_node["nodes"]:
-                if len(user["login"]) <= len(shortest_name) and user["login"].startswith(user_id):
-                    shortest_name = user["login"]
-                    names_to_ids[user_id] = user["id"]
-                    names_to_logins[user_id] = user["login"]
-                    found_match = True
-            if not found_match:
-                logging.warning(
-                    "Couldn't find a prefixed match for {}, going with {} instead".format(
-                        user_id, shortest_name
-                    )
-                )
+    return prs
 
-    labels_to_ids = {}
-    for i, label in enumerate(labels):
-        this_node = pr_result["data"]["repository"][label_out[i]]
-        if this_node is not None:
-            labels_to_ids[label] = this_node["id"]
-        else:
-            logging.warning("Couldn't find an existing label named {}".format(label))
 
-    teams_to_ids = {}
-    teams_to_members: Dict[str, Optional[Set[str]]] = {}
-    for i, (org, slug) in enumerate(teams):
-        team_node = pr_result["data"][team_out[i]]
-        if team_node is not None and team_node["team"] is not None:
-            team_ref = f"{org}/{slug}"
-            teams_to_ids[team_ref] = team_node["team"]["id"]
-            members_node = team_node["team"]["members"]
-            member_logins = {m["login"] for m in members_node["nodes"]}
-            if members_node["totalCount"] > len(members_node["nodes"]):
-                # Team has more members than we fetched; we can't check membership reliably.
-                teams_to_members[team_ref] = None
-            else:
-                teams_to_members[team_ref] = member_logins
-        else:
-            logging.warning("Couldn't find a team matching {}/{}".format(org, slug))
+async def query_everything(
+    github_ep: github.GitHubEndpoint,
+    repo_info: GitHubRepoInfo,
+    head_refs: List[str],
+    user_ids: List[str],
+    labels: List[str],
+    teams: List[Tuple[str, str]],
+) -> Tuple[
+    str,
+    List[Optional[PrInfo]],
+    Dict[str, str],
+    Dict[str, str],
+    Dict[str, str],
+    Dict[str, str],
+    Dict[str, Optional[Set[str]]],
+]:
+    """
+    Query all necessary data from GitHub, batching PR lookups to stay within
+    GitHub's GraphQL resource limits.
+
+    Returns a tuple of:
+    - Repository node id
+    - List of pull requests, one for each ref in head_refs. None if a pr wasn't found for that ref
+    - Dict of user_ids as given to graphql node ids
+    - Dict of user_ids as given to their full login name
+    - Dict of labels to their graphql node ids
+    - Dict of "org/slug" team refs to graphql node ids
+    - Dict of "org/slug" team refs to their member logins. None if the team has more members
+      than we fetched (meaning membership is unknown / incomplete).
+    """
+    (
+        repo_id,
+        names_to_ids,
+        names_to_logins,
+        labels_to_ids,
+        teams_to_ids,
+        teams_to_members,
+    ) = await _query_repo_users_labels(github_ep, repo_info, user_ids, labels, teams)
+
+    batch_size = github_ep.batch_size
+    prs: List[Optional[PrInfo]] = []
+    for i in range(0, len(head_refs), batch_size):
+        prs.extend(await _query_prs_batch(github_ep, repo_info, head_refs[i : i + batch_size]))
 
     return (
-        pr_result["data"]["repository"]["id"],
+        repo_id,
         prs,
         names_to_ids,
         names_to_logins,
@@ -501,16 +571,13 @@ async def query_everything(
     )
 
 
-async def create_pull_requests(
+async def _create_pull_requests_batch(
     github_ep: github.GitHubEndpoint,
     repo_id: str,
     repo_info: GitHubRepoInfo,
     fork_info: GitHubRepoInfo,
     prs: List[PrInfo],
 ) -> None:
-    """
-    Create all pull requests given in prs and modify them to add the new pr node id and URL.
-    """
     inputs = []
     for pr in prs:
         headRef = (
@@ -558,8 +625,24 @@ async def create_pull_requests(
             pr.url = result["url"]
 
 
+async def create_pull_requests(
+    github_ep: github.GitHubEndpoint,
+    repo_id: str,
+    repo_info: GitHubRepoInfo,
+    fork_info: GitHubRepoInfo,
+    prs: List[PrInfo],
+) -> None:
+    """
+    Create all pull requests given in prs and modify them to add the new pr node id and URL.
+    """
+    batch_size = github_ep.batch_size
+    for i in range(0, len(prs), batch_size):
+        await _create_pull_requests_batch(
+            github_ep, repo_id, repo_info, fork_info, prs[i : i + batch_size]
+        )
+
+
 TRANSIENT_STATUSES = frozenset({500, 502, 503, 504})
-RETRYABLE_GRAPHQL_ERRORS = frozenset({"RESOURCE_LIMITS_EXCEEDED"})
 
 
 async def _refresh_new_comment_ids(github_ep: github.GitHubEndpoint, prs: List[PrUpdate]) -> None:
@@ -600,10 +683,9 @@ async def _refresh_new_comment_ids(github_ep: github.GitHubEndpoint, prs: List[P
                 logging.info("Comment already posted on PR, converting to edit")
 
 
-async def update_pull_requests(github_ep: github.GitHubEndpoint, prs: List[PrUpdate]) -> None:
-    """
-    Update the given pull request contents, and also add reviewers and labels.
-    """
+async def _update_pull_requests_batch(
+    github_ep: github.GitHubEndpoint, prs: List[PrUpdate]
+) -> None:
     # Build non-comment parts once (all idempotent, safe to retry as-is).
     inputs = []
     labels = []
@@ -855,15 +937,11 @@ async def update_pull_requests(github_ep: github.GitHubEndpoint, prs: List[PrUpd
                 max_retries,
             )
         except RevupGithubException as e:
-            retryable = set(e.types) & RETRYABLE_GRAPHQL_ERRORS
-            is_timeout = "timeout" in e.message
-            if not (retryable or is_timeout) or attempt >= max_retries - 1:
+            if "timeout" not in e.message or attempt >= max_retries - 1:
                 raise
             delay = base_delay * (2**attempt)
-            reason = ", ".join(retryable) if retryable else "timeout"
             logging.warning(
-                "GitHub GraphQL error (%s), retrying in %ss (attempt %d/%d)",
-                reason,
+                "GitHub GraphQL error (timeout), retrying in %ss (attempt %d/%d)",
                 delay,
                 attempt + 1,
                 max_retries,
@@ -875,6 +953,15 @@ async def update_pull_requests(github_ep: github.GitHubEndpoint, prs: List[PrUpd
             _refresh_new_comment_ids(github_ep, prs),
             asyncio.sleep(delay),
         )
+
+
+async def update_pull_requests(github_ep: github.GitHubEndpoint, prs: List[PrUpdate]) -> None:
+    """
+    Update the given pull request contents, and also add reviewers and labels.
+    """
+    batch_size = github_ep.batch_size
+    for i in range(0, len(prs), batch_size):
+        await _update_pull_requests_batch(github_ep, prs[i : i + batch_size])
 
 
 RE_PR_URL = re.compile(
@@ -973,7 +1060,10 @@ async def github_connection(
         )
 
     github_ep = github_real.RealGitHubEndpoint(
-        oauth_token=args.github_oauth, proxy=args.proxy, github_url=args.github_url
+        oauth_token=args.github_oauth,
+        proxy=args.proxy,
+        github_url=args.github_url,
+        batch_size=args.github_batch_size,
     )
     try:
         yield github_ep, repo_info, fork_info
