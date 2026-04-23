@@ -50,6 +50,10 @@ class PrInfo:
     assignee_ids: Set[str] = field(default_factory=set)
     labels: Set[str] = field(default_factory=set)
     label_ids: Set[str] = field(default_factory=set)
+    removed_reviewers: Set[str] = field(default_factory=set)
+    removed_reviewer_ids: Set[str] = field(default_factory=set)
+    removed_assignees: Set[str] = field(default_factory=set)
+    removed_assignee_ids: Set[str] = field(default_factory=set)
     is_draft: bool = False
     comments: List[PrComment] = field(default_factory=list)
 
@@ -225,6 +229,29 @@ async def query_everything(
                         }}
                     }}
                 }}
+                timelineItems(
+                    itemTypes: [REVIEW_REQUEST_REMOVED_EVENT, UNASSIGNED_EVENT]
+                    first: 50
+                ) {{
+                    nodes {{
+                        ... on ReviewRequestRemovedEvent {{
+                            requestedReviewer {{
+                                ... on User {{
+                                    login
+                                    id
+                                }}
+                            }}
+                        }}
+                        ... on UnassignedEvent {{
+                            assignee {{
+                                ... on User {{
+                                    login
+                                    id
+                                }}
+                            }}
+                        }}
+                    }}
+                }}
                 latestReviews (first: 25) {{
                     nodes {{
                         author {{
@@ -317,6 +344,20 @@ async def query_everything(
             for c in this_node["comments"]["nodes"]:
                 comments.append(PrComment(c["body"], c["id"]))
 
+            removed_reviewers: Set[str] = set()
+            removed_reviewer_ids: Set[str] = set()
+            removed_assignees: Set[str] = set()
+            removed_assignee_ids: Set[str] = set()
+            for event in this_node["timelineItems"]["nodes"]:
+                rr = event.get("requestedReviewer")
+                if rr and "login" in rr and rr["login"] not in reviewers:
+                    removed_reviewers.add(rr["login"])
+                    removed_reviewer_ids.add(rr["id"])
+                assignee = event.get("assignee")
+                if assignee and "login" in assignee and assignee["login"] not in assignees:
+                    removed_assignees.add(assignee["login"])
+                    removed_assignee_ids.add(assignee["id"])
+
             prs.append(
                 PrInfo(
                     id=this_node["id"],
@@ -333,6 +374,10 @@ async def query_everything(
                     assignee_ids=assignee_ids,
                     labels=pr_labels,
                     label_ids=pr_label_ids,
+                    removed_reviewers=removed_reviewers,
+                    removed_reviewer_ids=removed_reviewer_ids,
+                    removed_assignees=removed_assignees,
+                    removed_assignee_ids=removed_assignee_ids,
                     is_draft=this_node["isDraft"],
                     state=this_node["state"],
                     comments=comments,
