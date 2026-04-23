@@ -5,7 +5,9 @@ revup amend - Modify commits in the current stack.
 # SYNOPSIS
 
 `revup [--verbose] [--keep-temp]`
-: `amend [--help] [--no-edit] [--all] <ref|topic>`
+: `amend [--help] [--edit] [--insert] [--drop] [--all]`
+`[--base-branch=<br>] [--relative-branch=<br>]`
+`[--no-parse-topics] [--no-parse-refs] [<ref|topic>]`
 
 # DESCRIPTION
 
@@ -43,9 +45,9 @@ ancestor of the most recent commit of the topic `mytopic`).
 **--help, -h**
 : Show this help page.
 
-**--no-edit**
-: Don't open up an editor to edit the commit message and instead
-use the old commit message as-is.
+**--edit, -s**
+: Open an editor to edit the commit message. Enabled by default.
+Use --no-edit to skip editing and keep the old commit message as-is.
 
 **--insert, -i**
 : Instead of amending the given commit, insert the changes in cache

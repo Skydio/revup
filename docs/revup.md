@@ -30,6 +30,9 @@ graphql requests to github.
 **--help, -h**
 : Show this help page.
 
+**--version**
+: Print the version of revup and exit.
+
 **--proxy**
 : Proxy to use when making connections to GitHub
 
