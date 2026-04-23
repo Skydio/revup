@@ -5,8 +5,8 @@ revup restack - Reorder commits to group topics together.
 # SYNOPSIS
 
 `revup [--verbose] [--keep-temp]`
-: `restack [--help] [--base-branch=<base>] [--num-commits=<N>]`
-`[--relative-chain]`
+: `restack [--help] [--base-branch=<base>] [--relative-branch=<br>]`
+`[--topicless-last]`
 
 # DESCRIPTION
 
@@ -40,10 +40,9 @@ tags are parsed.
 : Instead of automatically detecting the base branch, use the given
 branch as the base.
 
-**--relative-chain, -r**
-: Ignore all relative topic tags and instead act as though each topic is
-relative to the topic before it. This can save effort typing out relative
-tags when you know all reviews in the stack will be dependent.
+**--relative-branch, -e**
+: Use the given branch as the relative branch. See `revup upload -h`
+for the definition of a relative branch.
 
 **--topicless-last, -t**
 : Apply all topicless commits last (at the top of the commit stack) instead
