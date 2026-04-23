@@ -22,7 +22,10 @@ def _main() -> None:
         # Instead, we can manually create the event loop and prevent the RuntimeError on shutdown.
         revup_parser, all_parsers = build_parser()
         loop = asyncio.new_event_loop()
-        sys.exit(loop.run_until_complete(main(revup_parser, all_parsers)))
+        try:
+            sys.exit(loop.run_until_complete(main(revup_parser, all_parsers)))
+        finally:
+            loop.close()
     except RevupUsageException as e:
         logging.error(str(e))
         sys.exit(2)
