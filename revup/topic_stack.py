@@ -1142,6 +1142,7 @@ class TopicStack:
     def populate_update_info(
         self,
         update_pr_body_arg: bool,
+        force_reviewers: bool = False,
     ) -> None:
         """
         Populate information necessary to do PR creation / update in github.
@@ -1213,6 +1214,19 @@ class TopicStack:
                 assignee_logins = translate_if_exists(
                     topic.tags[TAG_ASSIGNEE], self.names_to_logins
                 ).difference(review.pr_info.assignees)
+
+                if not force_reviewers:
+                    removed = reviewer_logins & review.pr_info.removed_reviewers
+                    if removed:
+                        logging.warning(f"Skipping removed reviewer(s) {removed} for {topic.name}")
+                        reviewer_logins -= removed
+                        reviewer_ids -= review.pr_info.removed_reviewer_ids
+
+                    removed = assignee_logins & review.pr_info.removed_assignees
+                    if removed:
+                        logging.warning(f"Skipping removed assignee(s) {removed} for {topic.name}")
+                        assignee_logins -= removed
+                        assignee_ids -= review.pr_info.removed_assignee_ids
 
                 if TAG_UPDATE_PR_BODY in topic.tags:
                     update_pr_body = min(topic.tags[TAG_UPDATE_PR_BODY]).lower() == "true"

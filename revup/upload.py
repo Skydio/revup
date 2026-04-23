@@ -70,7 +70,7 @@ async def main(
         return 0
 
     if not args.push_only:
-        topics.populate_update_info(args.update_pr_body)
+        topics.populate_update_info(args.update_pr_body, args.force_reviewers)
     if not args.skip_confirm and topics.num_reviews_changed() > 0:
         topics.print(not args.verbose)
         if git_ctx.sh.wait_for_confirmation():

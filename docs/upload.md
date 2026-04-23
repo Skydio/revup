@@ -9,7 +9,7 @@ revup upload - Modify or create code reviews.
 `[--rebase] [--relative-chain] [--skip-confirm] [--dry-run] [--push-only]`
 `[--status] [--no-update-pr-body] [--review-graph]`
 `[--trim-tags] [--create-local-branches] [--patchsets] [--auto-add-users=<o>]`
-`[--labels=<labels>] [<topics>]`
+`[--force-reviewers] [--labels=<labels>] [<topics>]`
 
 # DESCRIPTION
 
@@ -208,6 +208,9 @@ the above section for details.
 **--user-aliases**
 : Specifies a comma separated list of colon separated username mappings. These
 mappings are used to transform usernames specified in Reviewers/Assignees.
+
+**--force-reviewers**
+: Re-add reviewers and assignees even if they were manually removed from the PR.
 
 **--auto-add-users**
 : If "no", do nothing extra. If "r2a", add users from the Reviewers tag as assignees.
