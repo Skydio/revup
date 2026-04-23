@@ -54,6 +54,17 @@ class RevupRichHandler(RichHandler):
 
 
 def configure_logger(debug: bool, redactions: Dict[str, str]) -> None:
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG if debug else logging.INFO)
+
+    for h in root_logger.handlers:
+        if isinstance(h, RichHandler):
+            for k, v in redactions.items():
+                for f in h.filters:
+                    if isinstance(f, RedactingFilter):
+                        f.redact(k, v)
+            return
+
     log_filter = RedactingFilter()
     for k, v in redactions.items():
         log_filter.redact(k, v)
@@ -69,9 +80,7 @@ def configure_logger(debug: bool, redactions: Dict[str, str]) -> None:
     )
     handler.highlighter = None  # type: ignore
 
-    root_logger = logging.getLogger()
     root_logger.addHandler(handler)
-    root_logger.setLevel(logging.DEBUG if debug else logging.INFO)
 
 
 def redact(redactions: Dict[str, str]) -> None:

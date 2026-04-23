@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import List, Optional
 
-from revup.config import Config
+from revup.config import Config, RevupArgParser
 
 
 class ShellType(enum.Enum):
@@ -65,6 +65,24 @@ def topic_completer(
         return [n for n in asyncio.run(_get_names()) if n.startswith(prefix) and n not in already]
     except (OSError, RuntimeError):
         return []
+
+
+def make_config_flag_completer(
+    all_parsers: List[RevupArgParser],
+) -> object:
+    def _completer(prefix: str, **_kwargs: object) -> List[str]:
+        from revup.config import collect_known_keys
+
+        flags = []
+        for section, keys in collect_known_keys(all_parsers).items():
+            for key in keys:
+                if section == "revup":
+                    flags.append(key)
+                else:
+                    flags.append(f"{section}.{key}")
+        return [f for f in flags if f.startswith(prefix)]
+
+    return _completer
 
 
 def prompt_config_key(shell: ShellType) -> str:

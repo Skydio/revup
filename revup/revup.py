@@ -6,21 +6,18 @@ import os
 import stat
 import subprocess
 import sys
-from builtins import FileNotFoundError
 from typing import Any, List, Tuple
-
-import argcomplete
 
 import revup
 from revup import config, git, logs, shell
 from revup.completion import (
     ShellType,
     install_completion,
+    make_config_flag_completer,
     maybe_prompt_user_for_completions,
     topic_completer,
 )
 from revup.config import RevupArgParser
-from revup.github_utils import github_connection
 from revup.types import RevupUsageException
 
 REVUP_CONFIG_ENV_VAR = "REVUP_CONFIG_PATH"
@@ -211,7 +208,10 @@ def build_parser() -> Tuple[RevupArgParser, List[RevupArgParser]]:
     cherry_pick_parser.add_argument("--base-branch", "-b")
 
     config_parser.add_argument("--help", "-h", action=HelpAction, nargs=0)
-    config_parser.add_argument("flag", nargs=1)
+    config_flag_arg = config_parser.add_argument("flag", nargs=1)
+    config_flag_arg.completer = make_config_flag_completer(  # type: ignore[attr-defined]
+        all_parsers
+    )
     config_parser.add_argument("value", nargs="?")
     config_parser.add_argument("--repo", "-r", action="store_true")
     config_parser.add_argument("--delete", "-d", action="store_true")
@@ -277,11 +277,14 @@ def build_parser() -> Tuple[RevupArgParser, List[RevupArgParser]]:
         help="Print the titles for all commits within a topic",
     )
 
-    argcomplete.autocomplete(
-        revup_parser,
-        always_complete_options=False,
-        exclude=revup_parser.collect_excluded_completions(),
-    )
+    if "_ARGCOMPLETE" in os.environ:
+        import argcomplete
+
+        argcomplete.autocomplete(
+            revup_parser,
+            always_complete_options=False,
+            exclude=revup_parser.collect_excluded_completions(),
+        )
 
     return revup_parser, all_parsers
 
@@ -290,20 +293,17 @@ async def main(revup_parser: RevupArgParser, all_parsers: List[RevupArgParser]) 
     # Do an initial parsing pass, which handles HelpAction
     args = revup_parser.parse_args()
     conf = await get_config()
+    logs.configure_logger(False, {})
 
     if args.cmd == "install-completion":
-        logs.configure_logger(False, {})
         return install_completion(args.shell, args.rc_file, conf)
 
     # Run config before setting the config, in order to avoid the situation where a broken
     # config prevents you from running config at all.
     if args.cmd == "config":
-        logs.configure_logger(False, {})
         return config.config_main(conf, args, all_parsers)
 
-    for p in all_parsers:
-        assert isinstance(p, RevupArgParser)
-        p.set_defaults_from_config(conf.get_config())
+    conf.apply_to_parsers(all_parsers)
     args = revup_parser.parse_args()
 
     # So users don't accidentally leak their oauth when sharing logs
@@ -350,6 +350,8 @@ async def main(revup_parser: RevupArgParser, all_parsers: List[RevupArgParser]) 
         from revup import restack
 
         return await restack.main(args=args, git_ctx=git_ctx)
+
+    from revup.github_utils import github_connection
 
     async with github_connection(args=args, git_ctx=git_ctx, conf=conf) as (
         github_ep,

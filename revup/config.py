@@ -5,7 +5,7 @@ import logging
 import os
 import re
 from argparse import _StoreAction, _StoreFalseAction, _StoreTrueAction
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from revup.types import RevupUsageException
 
@@ -116,12 +116,16 @@ class Config:
         self.config = configparser.ConfigParser()
         self.config_path = config_path
         self.repo_config_path = repo_config_path
+        self.file_configs: List[Tuple[str, configparser.ConfigParser]] = []
 
     def read(self) -> None:
-        if self.repo_config_path:
-            self.config.read(self.repo_config_path)
-        if self.config_path:
-            self.config.read(self.config_path)
+        for path in (self.repo_config_path, self.config_path):
+            if not path:
+                continue
+            file_conf = configparser.ConfigParser()
+            if file_conf.read(path):
+                self.file_configs.append((path, file_conf))
+            self.config.read(path)
 
     def write(self) -> None:
         if not self.dirty:
@@ -151,6 +155,24 @@ class Config:
 
     def get_config(self) -> configparser.ConfigParser:
         return self.config
+
+    def apply_to_parsers(self, all_parsers: List[RevupArgParser]) -> None:
+        for p in all_parsers:
+            p.set_defaults_from_config(self.config)
+        known = collect_known_keys(all_parsers)
+        for path, file_conf in self.file_configs:
+            for section in file_conf.sections():
+                known_keys = known.get(section)
+                if known_keys is None:
+                    logging.warning(f"Unrecognized config section [{section}] in {path}")
+                    continue
+                for key in file_conf.options(section):
+                    if key not in known_keys:
+                        logging.warning(f"Unrecognized config key {section}.{key} in {path}")
+
+
+def collect_known_keys(all_parsers: List[RevupArgParser]) -> Dict[str, List[str]]:
+    return {p.get_command(): list(p.get_actions().keys()) for p in all_parsers}
 
 
 def config_main(conf: Config, args: argparse.Namespace, all_parsers: List[RevupArgParser]) -> int:
