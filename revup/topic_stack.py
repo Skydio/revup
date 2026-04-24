@@ -1366,53 +1366,6 @@ class TopicStack:
         if prs_to_update:
             await github_utils.update_pull_requests(self.github_ep, prs_to_update)
 
-    async def restack(self, topicless_last: bool) -> GitCommitHash:
-        """
-        Create a new commit chain consisting of current commits but with commits
-        in a single topic consolidated together.
-        """
-        to_pick = []
-        for _, topic in self.topological_topics():
-            this_topic = []
-            topic_is_empty = True
-            for commit in topic.original_commits:
-                this_topic.append(commit)
-                if not await self.git_ctx.have_identical_trees(commit.commit_id, commit.parents[0]):
-                    topic_is_empty = False
-            # Drop empty topics, ie topics with all empty commits. git pull --rebase
-            # doesn't automatically drop empty commits if they're been merged.
-            if not topic_is_empty:
-                to_pick.extend(this_topic)
-        no_topic = []
-        for commit in self.commits:
-            if commit not in to_pick and not await self.git_ctx.have_identical_trees(
-                commit.commit_id, commit.parents[0]
-            ):
-                no_topic.append(commit)
-
-        new_parent = self.commits[0].parents[0]
-        if topicless_last:
-            to_restack = to_pick + no_topic
-        else:
-            to_restack = no_topic + to_pick
-        for commit in to_restack:
-            try:
-                new_parent = await self.git_ctx.synthetic_cherry_pick_from_commit(
-                    commit, new_parent
-                )
-            except GitConflictException as exc:
-                await self.git_ctx.dump_conflict(exc)
-                raise RevupConflictException(
-                    commit,
-                    new_parent,
-                    "You may need to `git rebase -i` to resolve these conflicts!",
-                ) from exc
-        git_env = {
-            "GIT_REFLOG_ACTION": "reset --soft (revup restack)",
-        }
-        await self.git_ctx.soft_reset(new_parent, git_env)
-        return new_parent
-
     def num_reviews_changed(self) -> int:
         """
         Return the number of reviews that require some action (push / create / update).

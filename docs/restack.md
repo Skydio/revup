@@ -6,7 +6,7 @@ revup restack - Reorder commits to group topics together.
 
 `revup [--verbose] [--keep-temp]`
 : `restack [--help] [--base-branch=<base>] [--relative-branch=<br>]`
-`[--topicless-last]`
+`[--topicless-last] [--squash]`
 
 # DESCRIPTION
 
@@ -47,3 +47,7 @@ for the definition of a relative branch.
 **--topicless-last, -t**
 : Apply all topicless commits last (at the top of the commit stack) instead
 of first.
+
+**--squash, -s**
+: Squash all commits within each topic into a single commit. Commit messages
+are merged and duplicate revup tags are combined.
