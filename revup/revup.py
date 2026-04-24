@@ -18,6 +18,7 @@ from revup.completion import (
     topic_completer,
 )
 from revup.config import RevupArgParser
+from revup.topic_stack import PrBodySource
 from revup.types import RevupUsageException
 
 REVUP_CONFIG_ENV_VAR = "REVUP_CONFIG_PATH"
@@ -190,6 +191,12 @@ def build_parser() -> Tuple[RevupArgParser, List[RevupArgParser]]:
     upload_parser.add_argument("--relative-chain", "-c", action="store_true")
     upload_parser.add_argument("--auto-topic", "-a", action="store_true")
     upload_parser.add_argument("--force-reviewers", action="store_true")
+    upload_parser.add_argument(
+        "--pr-body-source",
+        type=PrBodySource,
+        choices=PrBodySource,
+        default=PrBodySource.FIRST_COMMIT,
+    )
     upload_parser.add_argument("--head", default="HEAD")
 
     restack_parser.add_argument("--topicless-last", "-t", action="store_true")

@@ -3,7 +3,7 @@ import argparse
 import pytest
 from git_env import GitTestEnvironment, async_test
 
-from revup.topic_stack import TopicStack, format_remote_branch
+from revup.topic_stack import PrBodySource, TopicStack, format_remote_branch
 from revup.types import RevupConflictException, RevupUsageException
 
 
@@ -761,3 +761,79 @@ class TestUploadMultipleBranches:
                 assert review.base_ref == root_hash
                 content = await get_file_at_ref(env, review.new_commits[-1], "a.txt")
                 assert content == "hello"
+
+
+class TestPrBodySource:
+    @async_test
+    async def test_first_commit_uses_first_commit_body(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            await env.commit("title\n\nfirst body\n\nTopic: alpha", {"a.txt": "a"})
+            await env.commit("second\n\nsecond body\n\nTopic: alpha", {"b.txt": "b"})
+
+            topics = await run_upload_pipeline(env)
+            topic = topics.topics["alpha"]
+            body, title = topics._get_pr_body_and_title(topic, PrBodySource.FIRST_COMMIT)
+
+            assert title == "title"
+            assert "first body" in body
+            assert "second body" not in body
+
+    @async_test
+    async def test_squashed_merges_all_commit_bodies(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            await env.commit("title one\n\nbody one\n\nTopic: alpha", {"a.txt": "a"})
+            await env.commit("title two\n\nbody two\n\nTopic: alpha", {"b.txt": "b"})
+
+            topics = await run_upload_pipeline(env)
+            topic = topics.topics["alpha"]
+            body, title = topics._get_pr_body_and_title(topic, PrBodySource.SQUASHED)
+
+            assert "body one" in body
+            assert "body two" in body
+
+    @async_test
+    async def test_squashed_strips_tags(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            await env.commit(
+                "feat\n\nreal content\n\nTopic: alpha\nReviewer: alice", {"a.txt": "a"}
+            )
+
+            topics = await run_upload_pipeline(env)
+            topic = topics.topics["alpha"]
+            body, title = topics._get_pr_body_and_title(topic, PrBodySource.SQUASHED)
+
+            assert "alice" not in body
+            assert "Topic" not in body
+            assert "real content" in body
+
+    @async_test
+    async def test_template_reads_github_template(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            await env.commit("feat\n\nTopic: alpha", {"a.txt": "a"})
+
+            # Create a PR template
+            await env.write_file(".github/PULL_REQUEST_TEMPLATE.md", "## Summary\n\n## Test Plan\n")
+
+            topics = await run_upload_pipeline(env)
+            topic = topics.topics["alpha"]
+            body, title = topics._get_pr_body_and_title(topic, PrBodySource.TEMPLATE)
+
+            assert "## Summary" in body
+            assert "## Test Plan" in body
+            assert title == "feat"
+
+    @async_test
+    async def test_template_returns_empty_when_no_template(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            await env.commit("feat\n\nbody text\n\nTopic: alpha", {"a.txt": "a"})
+
+            topics = await run_upload_pipeline(env)
+            topic = topics.topics["alpha"]
+            body, title = topics._get_pr_body_and_title(topic, PrBodySource.TEMPLATE)
+
+            assert body == ""
