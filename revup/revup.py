@@ -192,6 +192,7 @@ def build_parser() -> Tuple[RevupArgParser, List[RevupArgParser]]:
     upload_parser.add_argument("--head", default="HEAD")
 
     restack_parser.add_argument("--topicless-last", "-t", action="store_true")
+    restack_parser.add_argument("--squash", "-s", action="store_true")
 
     ref_or_topic_arg = amend_parser.add_argument("ref_or_topic", nargs="?")
     ref_or_topic_arg.completer = topic_completer  # type: ignore[attr-defined]
