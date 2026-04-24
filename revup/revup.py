@@ -20,6 +20,7 @@ from revup.completion import (
     topic_completer,
 )
 from revup.config import RevupArgParser
+from revup.github import DEFAULT_BATCH_SIZE
 from revup.github_utils import github_connection
 from revup.types import RevupUsageException
 
@@ -55,6 +56,7 @@ def make_toplevel_parser() -> RevupArgParser:
     revup_parser.add_argument("--github-oauth")
     revup_parser.add_argument("--github-username")
     revup_parser.add_argument("--github-url", default="github.com")
+    revup_parser.add_argument("--github-batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     revup_parser.add_argument("--remote-name", default="origin")
     revup_parser.add_argument("--fork-name", default="")
     revup_parser.add_argument("--editor")

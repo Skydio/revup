@@ -1,4 +1,5 @@
 import argparse
+import asyncio
 import logging
 import os
 import re
@@ -18,7 +19,12 @@ from typing import (
 
 from revup import config, git, github, logs
 from revup.git import GitHubRepoInfo
-from revup.types import GitCommitHash, RevupGithubException, RevupUsageException
+from revup.types import (
+    GitCommitHash,
+    RevupGithubException,
+    RevupRequestException,
+    RevupUsageException,
+)
 
 MAX_COMMENTS_TO_QUERY = 3
 
@@ -109,37 +115,112 @@ def zip_and_flatten(l1: Iterable[str], l2: Iterable[str]) -> List[str]:
     return ret
 
 
-async def query_everything(
+async def _query_repo_users_labels(
     github_ep: github.GitHubEndpoint,
     repo_info: GitHubRepoInfo,
-    head_refs: List[str],
     user_ids: List[str],
     labels: List[str],
-) -> Tuple[str, List[Optional[PrInfo]], Dict[str, str], Dict[str, str], Dict[str, str]]:
-    """
-    This function does all necessary graphql querying in one request. This dramatically reduces the
-    amount of time spent on querying.
-
-    Returns a tuple of:
-    - Repository node id
-    - List of pull requests, one for each ref in head_refs. None if a pr wasn't found for that ref
-    - Dict of user_ids as given to graphql node ids
-    - Dict of user_ids as given to their full login name
-    - Dict of labels to their graphql node ids
-    """
-    head_refs_args = get_args_dict(head_refs, "pr")
+) -> Tuple[str, Dict[str, str], Dict[str, str], Dict[str, str]]:
     user_id_args = get_args_dict(user_ids, "user")
     label_args = get_args_dict(labels, "label")
 
-    prs_out = get_result_args(len(head_refs), "pr_out")
     user_id_out = get_result_args(len(user_ids), "user_out")
     label_out = get_result_args(len(labels), "label_out")
 
     arg_str = ", ".join(
-        get_args_declaration(head_refs_args, "String!")
-        + get_args_declaration(user_id_args, "String!")
-        + get_args_declaration(label_args, "String!")
+        get_args_declaration(user_id_args, "String!") + get_args_declaration(label_args, "String!")
     )
+    if arg_str:
+        arg_str = ", " + arg_str
+
+    user_str = "".join(
+        len(user_ids) * ["{}: assignableUsers (query: ${}, first: 25) {{...UserResult}},"]
+    )
+    user_str = user_str.format(*zip_and_flatten(user_id_out, user_id_args.keys()))
+
+    label_str = "".join(len(labels) * ["{}: label (name: ${}) {{...LabelResult}},"])
+    label_str = label_str.format(*zip_and_flatten(label_out, label_args.keys()))
+
+    query_str = f"""
+        query ($owner: String!, $name: String!{arg_str}) {{
+            repository(name: $name, owner: $owner) {{
+                id
+                {user_str}{label_str}
+            }}
+        }}"""
+    if user_str:
+        query_str += """
+        fragment UserResult on UserConnection {
+            nodes {
+                login
+                id
+            }
+            totalCount
+        }"""
+    if label_str:
+        query_str += """
+        fragment LabelResult on Label {
+            id
+            name
+        }"""
+
+    result = await github_ep.graphql(
+        query_str,
+        owner=repo_info.owner,
+        name=repo_info.name,
+        **user_id_args,
+        **label_args,
+    )
+
+    repo_id = result["data"]["repository"]["id"]
+
+    names_to_ids: Dict[str, str] = {}
+    names_to_logins: Dict[str, str] = {}
+    for i, user_id in enumerate(user_ids):
+        this_node = result["data"]["repository"][user_id_out[i]]
+        if len(this_node["nodes"]) == 0:
+            logging.warning("No matching user found for {}".format(user_id))
+        else:
+            if this_node["totalCount"] > len(this_node["nodes"]):
+                logging.warning(
+                    "Too many matching users found for {}, try being more specific".format(user_id)
+                )
+            shortest_name = this_node["nodes"][0]["login"]
+            names_to_ids[user_id] = this_node["nodes"][0]["id"]
+            found_match = False
+            for user in this_node["nodes"]:
+                if len(user["login"]) <= len(shortest_name) and user["login"].startswith(user_id):
+                    shortest_name = user["login"]
+                    names_to_ids[user_id] = user["id"]
+                    names_to_logins[user_id] = user["login"]
+                    found_match = True
+            if not found_match:
+                logging.warning(
+                    "Couldn't find a prefixed match for {}, going with {} instead".format(
+                        user_id, shortest_name
+                    )
+                )
+
+    labels_to_ids: Dict[str, str] = {}
+    for i, label in enumerate(labels):
+        this_node = result["data"]["repository"][label_out[i]]
+        if this_node is not None:
+            labels_to_ids[label] = this_node["id"]
+        else:
+            logging.warning("Couldn't find an existing label named {}".format(label))
+
+    return repo_id, names_to_ids, names_to_logins, labels_to_ids
+
+
+async def _query_prs_batch(
+    github_ep: github.GitHubEndpoint,
+    repo_info: GitHubRepoInfo,
+    head_refs: List[str],
+) -> List[Optional[PrInfo]]:
+    head_refs_args = get_args_dict(head_refs, "pr")
+    prs_out = get_result_args(len(head_refs), "pr_out")
+
+    arg_str = ", ".join(get_args_declaration(head_refs_args, "String!"))
 
     # NOTE: There are possible limitations here because we depend on PRs being returned in order of
     # OPEN prs, followed by MERGED prs in the order that they merged. github doesn't offer these
@@ -156,38 +237,12 @@ async def query_everything(
     )
     request_str = request_str.format(*zip_and_flatten(prs_out, head_refs_args.keys()))
 
-    user_str = "".join(
-        len(user_ids) * ["{}: assignableUsers (query: ${}, first: 25) {{...UserResult}},"]
-    )
-    user_str = user_str.format(*zip_and_flatten(user_id_out, user_id_args.keys()))
-
-    label_str = "".join(len(labels) * ["{}: label (name: ${}) {{...LabelResult}},"])
-    label_str = label_str.format(*zip_and_flatten(label_out, label_args.keys()))
-
-    multi_query_str = f"""
-        query GetPrResults($owner: String!, $name: String!, {arg_str}) {{
+    query_str = f"""
+        query ($owner: String!, $name: String!, {arg_str}) {{
             repository(name: $name, owner: $owner) {{
-                id
-                {request_str}{user_str}{label_str}
+                {request_str}
             }}
-        }}"""
-    if user_str:
-        multi_query_str += """
-        fragment UserResult on UserConnection {
-            nodes {
-                login
-                id
-            }
-            totalCount
-        }"""
-    if label_str:
-        multi_query_str += """
-        fragment LabelResult on Label {
-            id
-            name
-        }"""
-    if request_str:
-        multi_query_str += f"""
+        }}
         fragment PrResult on PullRequestConnection {{
             nodes {{
                 id
@@ -261,12 +316,10 @@ async def query_everything(
         }}"""
 
     pr_result = await github_ep.graphql(
-        multi_query_str,
+        query_str,
         owner=repo_info.owner,
         name=repo_info.name,
         **head_refs_args,
-        **user_id_args,
-        **label_args,
     )
 
     prs: List[Optional[PrInfo]] = []
@@ -341,60 +394,46 @@ async def query_everything(
         else:
             prs.append(None)
 
-    names_to_ids = {}
-    names_to_logins = {}
-    for i, user_id in enumerate(user_ids):
-        this_node = pr_result["data"]["repository"][user_id_out[i]]
-        if len(this_node["nodes"]) == 0:
-            logging.warning("No matching user found for {}".format(user_id))
-        else:
-            if this_node["totalCount"] > len(this_node["nodes"]):
-                logging.warning(
-                    "Too many matching users found for {}, try being more specific".format(user_id)
-                )
-            shortest_name = this_node["nodes"][0]["login"]
-            names_to_ids[user_id] = this_node["nodes"][0]["id"]
-            found_match = False
-            for user in this_node["nodes"]:
-                if len(user["login"]) <= len(shortest_name) and user["login"].startswith(user_id):
-                    shortest_name = user["login"]
-                    names_to_ids[user_id] = user["id"]
-                    names_to_logins[user_id] = user["login"]
-                    found_match = True
-            if not found_match:
-                logging.warning(
-                    "Couldn't find a prefixed match for {}, going with {} instead".format(
-                        user_id, shortest_name
-                    )
-                )
+    return prs
 
-    labels_to_ids = {}
-    for i, label in enumerate(labels):
-        this_node = pr_result["data"]["repository"][label_out[i]]
-        if this_node is not None:
-            labels_to_ids[label] = this_node["id"]
-        else:
-            logging.warning("Couldn't find an existing label named {}".format(label))
 
-    return (
-        pr_result["data"]["repository"]["id"],
-        prs,
-        names_to_ids,
-        names_to_logins,
-        labels_to_ids,
+async def query_everything(
+    github_ep: github.GitHubEndpoint,
+    repo_info: GitHubRepoInfo,
+    head_refs: List[str],
+    user_ids: List[str],
+    labels: List[str],
+) -> Tuple[str, List[Optional[PrInfo]], Dict[str, str], Dict[str, str], Dict[str, str]]:
+    """
+    Query all necessary data from GitHub, batching PR lookups to stay within
+    GitHub's GraphQL resource limits.
+
+    Returns a tuple of:
+    - Repository node id
+    - List of pull requests, one for each ref in head_refs. None if a pr wasn't found for that ref
+    - Dict of user_ids as given to graphql node ids
+    - Dict of user_ids as given to their full login name
+    - Dict of labels to their graphql node ids
+    """
+    repo_id, names_to_ids, names_to_logins, labels_to_ids = await _query_repo_users_labels(
+        github_ep, repo_info, user_ids, labels
     )
 
+    batch_size = github_ep.batch_size
+    prs: List[Optional[PrInfo]] = []
+    for i in range(0, len(head_refs), batch_size):
+        prs.extend(await _query_prs_batch(github_ep, repo_info, head_refs[i : i + batch_size]))
 
-async def create_pull_requests(
+    return repo_id, prs, names_to_ids, names_to_logins, labels_to_ids
+
+
+async def _create_pull_requests_batch(
     github_ep: github.GitHubEndpoint,
     repo_id: str,
     repo_info: GitHubRepoInfo,
     fork_info: GitHubRepoInfo,
     prs: List[PrInfo],
 ) -> None:
-    """
-    Create all pull requests given in prs and modify them to add the new pr node id and URL.
-    """
     inputs = []
     for pr in prs:
         headRef = (
@@ -442,18 +481,74 @@ async def create_pull_requests(
             pr.url = result["url"]
 
 
-async def update_pull_requests(github_ep: github.GitHubEndpoint, prs: List[PrUpdate]) -> None:
+async def create_pull_requests(
+    github_ep: github.GitHubEndpoint,
+    repo_id: str,
+    repo_info: GitHubRepoInfo,
+    fork_info: GitHubRepoInfo,
+    prs: List[PrInfo],
+) -> None:
     """
-    Update the given pull request contents, and also add reviewers and labels.
+    Create all pull requests given in prs and modify them to add the new pr node id and URL.
     """
+    batch_size = github_ep.batch_size
+    for i in range(0, len(prs), batch_size):
+        await _create_pull_requests_batch(
+            github_ep, repo_id, repo_info, fork_info, prs[i : i + batch_size]
+        )
+
+
+TRANSIENT_STATUSES = frozenset({500, 502, 503, 504})
+
+
+async def _refresh_new_comment_ids(github_ep: github.GitHubEndpoint, prs: List[PrUpdate]) -> None:
+    """Re-query comments for PRs with new (id=None) comments.
+
+    If a comment with matching body text already exists on the PR, set its
+    id in-place so the next mutation attempt uses updateIssueComment instead
+    of addComment, avoiding duplicates.
+    """
+    prs_with_new = [pr for pr in prs if any(c.id is None for c in pr.comments)]
+    if not prs_with_new:
+        return
+
+    node_args = get_args_dict([pr.id for pr in prs_with_new], "node")
+    node_outs = get_result_args(len(prs_with_new), "node_out")
+    arg_str = ", ".join(get_args_declaration(node_args, "ID!"))
+
+    query_str = "".join(
+        len(prs_with_new)
+        * [
+            "{}: node(id: ${}) {{ ... on PullRequest {{ comments(first: "
+            + str(MAX_COMMENTS_TO_QUERY)
+            + ") {{ nodes {{ body id }} }} }} }},"
+        ]
+    )
+    query_str = query_str.format(*zip_and_flatten(node_outs, node_args.keys()))
+    query = f"query ({arg_str}) {{ {query_str} }}"
+
+    result = await github_ep.graphql(query, max_retries=1, **node_args)
+
+    for pr, out in zip(prs_with_new, node_outs):
+        pr_data = result["data"][out]
+        existing = pr_data.get("comments", {}).get("nodes", []) if pr_data else []
+        existing_by_body = {c["body"]: c["id"] for c in existing}
+        for comment in pr.comments:
+            if comment.id is None and comment.text in existing_by_body:
+                comment.id = existing_by_body[comment.text]
+                logging.info("Comment already posted on PR, converting to edit")
+
+
+async def _update_pull_requests_batch(
+    github_ep: github.GitHubEndpoint, prs: List[PrUpdate]
+) -> None:
+    # Build non-comment parts once (all idempotent, safe to retry as-is).
     inputs = []
     labels = []
     reviewers = []
     assignees = []
     convert_to_draft = []
     convert_from_draft = []
-    comments = []
-    edit_comments = []
     for pr in prs:
         update_dict = {
             "clientMutationId": "revup",
@@ -500,20 +595,6 @@ async def update_pull_requests(github_ep: github.GitHubEndpoint, prs: List[PrUpd
                     "pullRequestId": pr.id,
                 })
 
-        for c in pr.comments:
-            if c.id:
-                edit_comments.append({
-                    "body": c.text,
-                    "clientMutationId": "revup",
-                    "id": c.id,
-                })
-            else:
-                comments.append({
-                    "body": c.text,
-                    "clientMutationId": "revup",
-                    "subjectId": pr.id,
-                })
-
     inputs_args = get_args_dict(inputs, "pr")
     prs_out = get_result_args(len(inputs), "pr_out")
 
@@ -531,23 +612,6 @@ async def update_pull_requests(github_ep: github.GitHubEndpoint, prs: List[PrUpd
 
     from_draft_args = get_args_dict(convert_from_draft, "from_d")
     from_draft_out = get_result_args(len(convert_from_draft), "from_d_out")
-
-    comments_args = get_args_dict(comments, "com")
-    comments_out = get_result_args(len(comments), "com_out")
-
-    edit_comments_args = get_args_dict(edit_comments, "edit_com")
-    edit_comments_out = get_result_args(len(edit_comments), "edit_com_out")
-
-    arg_str = ", ".join(
-        get_args_declaration(inputs_args, "UpdatePullRequestInput!")
-        + get_args_declaration(labels_args, "AddLabelsToLabelableInput!")
-        + get_args_declaration(reviewers_args, "RequestReviewsInput!")
-        + get_args_declaration(assignees_args, "AddAssigneesToAssignableInput!")
-        + get_args_declaration(to_draft_args, "ConvertPullRequestToDraftInput!")
-        + get_args_declaration(from_draft_args, "MarkPullRequestReadyForReviewInput!")
-        + get_args_declaration(comments_args, "AddCommentInput!")
-        + get_args_declaration(edit_comments_args, "UpdateIssueCommentInput!")
-    )
 
     update_str = "".join(
         len(inputs)
@@ -616,57 +680,143 @@ async def update_pull_requests(github_ep: github.GitHubEndpoint, prs: List[PrUpd
     )
     from_draft_str = from_draft_str.format(*zip_and_flatten(from_draft_out, from_draft_args.keys()))
 
-    add_comments_str = "".join(
-        len(comments_args)
-        * [
-            """
+    idempotent_str = (
+        f"{update_str}{request_reviewers_str}{assignees_str}{add_labels_str}"
+        f"{to_draft_str}{from_draft_str}"
+    )
+    idempotent_decl = (
+        get_args_declaration(inputs_args, "UpdatePullRequestInput!")
+        + get_args_declaration(labels_args, "AddLabelsToLabelableInput!")
+        + get_args_declaration(reviewers_args, "RequestReviewsInput!")
+        + get_args_declaration(assignees_args, "AddAssigneesToAssignableInput!")
+        + get_args_declaration(to_draft_args, "ConvertPullRequestToDraftInput!")
+        + get_args_declaration(from_draft_args, "MarkPullRequestReadyForReviewInput!")
+    )
+    idempotent_kwargs = {
+        **inputs_args,
+        **reviewers_args,
+        **assignees_args,
+        **labels_args,
+        **to_draft_args,
+        **from_draft_args,
+    }
+
+    # Retry loop with idempotent addComment handling: between attempts,
+    # re-query PR comments so already-posted ones become edits, not adds.
+    max_retries = 3
+    base_delay = 1.0
+    for attempt in range(max_retries):
+        # Build comment parts from current pr.comments state.
+        # After _refresh_new_comment_ids, previously-new comments that were
+        # already posted will have their id set, routing them to
+        # updateIssueComment instead of addComment.
+        comments = []
+        edit_comments = []
+        for pr in prs:
+            for c in pr.comments:
+                if c.id:
+                    edit_comments.append({
+                        "body": c.text,
+                        "clientMutationId": "revup",
+                        "id": c.id,
+                    })
+                else:
+                    comments.append({
+                        "body": c.text,
+                        "clientMutationId": "revup",
+                        "subjectId": pr.id,
+                    })
+
+        comments_args = get_args_dict(comments, "com")
+        comments_out = get_result_args(len(comments), "com_out")
+
+        edit_comments_args = get_args_dict(edit_comments, "edit_com")
+        edit_comments_out = get_result_args(len(edit_comments), "edit_com_out")
+
+        arg_str = ", ".join(
+            idempotent_decl
+            + get_args_declaration(comments_args, "AddCommentInput!")
+            + get_args_declaration(edit_comments_args, "UpdateIssueCommentInput!")
+        )
+
+        add_comments_str = "".join(
+            len(comments_args)
+            * [
+                """
             {}: addComment(input: ${}) {{
                 clientMutationId
             }},"""
-        ]
-    )
-    add_comments_str = add_comments_str.format(*zip_and_flatten(comments_out, comments_args.keys()))
+            ]
+        )
+        add_comments_str = add_comments_str.format(
+            *zip_and_flatten(comments_out, comments_args.keys())
+        )
 
-    edit_comments_str = "".join(
-        len(edit_comments_args)
-        * [
-            """
+        edit_comments_str = "".join(
+            len(edit_comments_args)
+            * [
+                """
             {}: updateIssueComment(input: ${}) {{
                 clientMutationId
             }},"""
-        ]
-    )
-    edit_comments_str = edit_comments_str.format(
-        *zip_and_flatten(edit_comments_out, edit_comments_args.keys())
-    )
+            ]
+        )
+        edit_comments_str = edit_comments_str.format(
+            *zip_and_flatten(edit_comments_out, edit_comments_args.keys())
+        )
 
-    # Have any add comment mutations first in order to ensure that comments are at the top of the PR
-    mutation_str = f"""
+        # addComment first so new comments appear at the top of the PR
+        mutation_str = f"""
         mutation ({arg_str}) {{
-            {add_comments_str}{update_str}{request_reviewers_str}{assignees_str}{add_labels_str}\
-{to_draft_str}{from_draft_str}{edit_comments_str}
+            {add_comments_str}{idempotent_str}{edit_comments_str}
         }}"""
 
-    try:
-        await github_ep.graphql(
-            mutation_str,
-            **comments_args,
-            **inputs_args,
-            **reviewers_args,
-            **assignees_args,
-            **labels_args,
-            **to_draft_args,
-            **from_draft_args,
-            **edit_comments_args,
-        )
-    except RevupGithubException as e:
-        if "timeout" in e.message:
-            logging.warning(
-                "Github update request timed out! Most likely this is a false alarm and changes"
-                " actually succeeded. You may want to rerun this command to verify."
+        try:
+            await github_ep.graphql(
+                mutation_str,
+                max_retries=1,
+                **comments_args,
+                **idempotent_kwargs,
+                **edit_comments_args,
             )
-        else:
-            raise e
+            return
+        except RevupRequestException as e:
+            if e.status not in TRANSIENT_STATUSES or attempt >= max_retries - 1:
+                raise
+            delay = base_delay * (2**attempt)
+            logging.warning(
+                "GitHub returned %d, retrying in %ss (attempt %d/%d)",
+                e.status,
+                delay,
+                attempt + 1,
+                max_retries,
+            )
+        except RevupGithubException as e:
+            if "timeout" not in e.message or attempt >= max_retries - 1:
+                raise
+            delay = base_delay * (2**attempt)
+            logging.warning(
+                "GitHub GraphQL error (timeout), retrying in %ss (attempt %d/%d)",
+                delay,
+                attempt + 1,
+                max_retries,
+            )
+
+        # Before retrying, check which new comments were already posted
+        # and update their IDs so the next attempt edits instead of adds.
+        await asyncio.gather(
+            _refresh_new_comment_ids(github_ep, prs),
+            asyncio.sleep(delay),
+        )
+
+
+async def update_pull_requests(github_ep: github.GitHubEndpoint, prs: List[PrUpdate]) -> None:
+    """
+    Update the given pull request contents, and also add reviewers and labels.
+    """
+    batch_size = github_ep.batch_size
+    for i in range(0, len(prs), batch_size):
+        await _update_pull_requests_batch(github_ep, prs[i : i + batch_size])
 
 
 RE_PR_URL = re.compile(
@@ -765,7 +915,10 @@ async def github_connection(
         )
 
     github_ep = github_real.RealGitHubEndpoint(
-        oauth_token=args.github_oauth, proxy=args.proxy, github_url=args.github_url
+        oauth_token=args.github_oauth,
+        proxy=args.proxy,
+        github_url=args.github_url,
+        batch_size=args.github_batch_size,
     )
     try:
         yield github_ep, repo_info, fork_info
