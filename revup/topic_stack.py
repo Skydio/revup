@@ -8,6 +8,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 from rich import get_console
@@ -92,6 +93,15 @@ def translate_if_exists(names: Set[str], translation: Dict[str, str]) -> Set[str
     Return the translation entry for each name, only if it exists.
     """
     return set(translation[name] for name in names if name in translation)
+
+
+class PrBodySource(Enum):
+    FIRST_COMMIT = "first-commit"
+    SQUASHED = "squashed"
+    TEMPLATE = "template"
+
+    def __str__(self) -> str:
+        return self.value
 
 
 # The current state of each review within github.
@@ -1139,10 +1149,42 @@ class TopicStack:
                 self.relative_infos[pr_targets[i]] = pr_info
             i += 1
 
+    def _get_pr_body_and_title(self, topic: Topic, pr_body_source: PrBodySource) -> Tuple[str, str]:
+        first_msg = topic.original_commits[0].commit_msg
+        title = first_msg.split("\n", 1)[0]
+
+        if pr_body_source == PrBodySource.SQUASHED:
+            bodies = []
+            for commit in topic.original_commits:
+                _, trimmed = self.parse_commit_tags(commit.commit_msg)
+                if trimmed:
+                    bodies.append(trimmed)
+            body = "\n\n".join(bodies)
+            # Use first line of merged text as title, rest as body
+            lines = body.split("\n", 1)
+            title = lines[0]
+            body = lines[1].strip() if len(lines) > 1 else ""
+        elif pr_body_source == PrBodySource.TEMPLATE:
+            repo = Path(self.git_ctx.repo_root)
+            body = ""
+            for candidate in [
+                repo / ".github" / "PULL_REQUEST_TEMPLATE.md",
+                repo / "PULL_REQUEST_TEMPLATE.md",
+                repo / "docs" / "PULL_REQUEST_TEMPLATE.md",
+            ]:
+                if candidate.is_file():
+                    body = candidate.read_text().strip()
+                    break
+        else:
+            body = "\n".join(first_msg.split("\n")[1:]).strip()
+
+        return body, title
+
     def populate_update_info(
         self,
         update_pr_body_arg: bool,
         force_reviewers: bool = False,
+        pr_body_source: PrBodySource = PrBodySource.FIRST_COMMIT,
     ) -> None:
         """
         Populate information necessary to do PR creation / update in github.
@@ -1153,9 +1195,7 @@ class TopicStack:
             raise RuntimeError("Need to query before updating")
 
         for topic in self.topics.values():
-            commit_msg_lines = topic.original_commits[0].commit_msg.split("\n")
-            body = "\n".join(commit_msg_lines[1:]).strip()
-            title = commit_msg_lines[0]
+            body, title = self._get_pr_body_and_title(topic, pr_body_source)
             for branch, review in topic.reviews.items():
                 if review.status == PrStatus.NEW:
                     if not review.base_ref:
