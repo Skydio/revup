@@ -9,7 +9,7 @@ revup upload - Modify or create code reviews.
 `[--rebase] [--relative-chain] [--skip-confirm] [--dry-run] [--push-only]`
 `[--status] [--no-update-pr-body] [--review-graph]`
 `[--trim-tags] [--create-local-branches] [--patchsets] [--auto-add-users=<o>]`
-`[--force-reviewers] [--labels=<labels>] [<topics>]`
+`[--force-reviewers] [--pr-body-source=<src>] [--labels=<labels>] [<topics>]`
 
 # DESCRIPTION
 
@@ -211,6 +211,13 @@ mappings are used to transform usernames specified in Reviewers/Assignees.
 
 **--force-reviewers**
 : Re-add reviewers and assignees even if they were manually removed from the PR.
+
+**--pr-body-source**
+: Controls where the PR title and body text come from. Options are "first-commit"
+(default), "squashed", or "template". "first-commit" uses the first commit message
+in the topic. "squashed" merges all commit messages in the topic with tags stripped.
+"template" uses the repo's `PULL_REQUEST_TEMPLATE.md` (looked up in `.github/`,
+repo root, or `docs/`) and takes the title from the first commit.
 
 **--auto-add-users**
 : If "no", do nothing extra. If "r2a", add users from the Reviewers tag as assignees.
