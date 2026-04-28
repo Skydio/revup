@@ -499,6 +499,36 @@ class TestUploadAutoAddUsers:
             assert "asn1" in topics.topics["alpha"].tags["reviewer"]
 
 
+class TestUploadTeamReviewers:
+    @async_test
+    async def test_team_reviewer_kept_on_reviewer_tag(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            await env.commit("feat\n\nTopic: alpha\nReviewer: myorg/backend", {"a.txt": "a"})
+
+            topics = await run_upload_pipeline(env)
+            assert "myorg/backend" in topics.topics["alpha"].tags["reviewer"]
+
+    @async_test
+    async def test_team_assignee_raises(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            await env.commit("feat\n\nTopic: alpha\nAssignee: myorg/team, realuser", {"a.txt": "a"})
+
+            with pytest.raises(RevupUsageException):
+                await run_upload_pipeline(env)
+
+    @async_test
+    async def test_r2a_does_not_copy_team_into_assignees(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            await env.commit("feat\n\nTopic: alpha\nReviewer: myorg/team, user1", {"a.txt": "a"})
+
+            topics = await run_upload_pipeline(env, auto_add_users="r2a")
+            assert topics.topics["alpha"].tags["assignee"] == {"user1"}
+            assert "myorg/team" in topics.topics["alpha"].tags["reviewer"]
+
+
 class TestUploadUserAliases:
     @async_test
     async def test_alias_replaces_reviewer_name(self):

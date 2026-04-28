@@ -54,11 +54,16 @@ is specified, the auto detected base branch will be used.
 : Specifies reviewers that will be added on github. Names as given here can be
 any prefix of that user's github login name. If multiple users match a name,
 the user with the shortest login name will be used. If a reviewer cannot
-be found a warning is printed.
+be found a warning is printed. A reviewer can also be a team, specified as
+`org/team-slug`; teams are matched exactly by their org and slug. If it looks
+like the team has previously been resolved by Github's code review
+auto-assignment (i.e. if one of its members is already a reviewer on the PR),
+revup will not re-request the team, to avoid triggering auto-assignment again.
 
 **Assignees:**
 : Specifies assignees that will be added on github. Semantics are the same as
-for reviewers.
+for reviewers, except that Github does not support teams as assignees so
+`org/team-slug` entries are rejected as an error.
 
 **Labels:**
 : Specifies labels that will be added on github. Labels must match the label

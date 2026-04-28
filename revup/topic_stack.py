@@ -51,6 +51,14 @@ def format_remote_branch(uploader: str, base_branch: str, topic: str, branch_for
 
 RE_TAGS = re.compile(r"^(?P<tagname>[a-zA-Z\-]+):(?P<tagvalue>.*)$", re.MULTILINE)
 
+# Github team references use the form "org/team-slug". Anything with a "/" is treated as a team.
+RE_TEAM = re.compile(r"^(?P<org>[A-Za-z0-9][A-Za-z0-9-]*)/(?P<slug>[A-Za-z0-9_.-]+)$")
+
+
+def is_team(name: str) -> bool:
+    return RE_TEAM.match(name) is not None
+
+
 TAG_REVIEWER = "reviewer"
 TAG_ASSIGNEE = "assignee"
 TAG_BRANCH = "branch"
@@ -251,6 +259,13 @@ class TopicStack:
 
     # Github node ids of labels
     labels_to_ids: Optional[Dict[str, str]] = None
+
+    # Github node ids of teams, keyed by "org/slug"
+    teams_to_ids: Optional[Dict[str, str]] = None
+
+    # Team member logins keyed by "org/slug". None means the team is too large to
+    # enumerate fully, and membership should be treated as unknown.
+    teams_to_members: Optional[Dict[str, Optional[Set[str]]]] = None
 
     # Relative branch names to pr_info for those branches
     relative_infos: Dict[str, PrInfo] = field(default_factory=dict)
@@ -591,9 +606,20 @@ class TopicStack:
                             topic.tags[tag].add(user_target)
 
             if auto_add_users in ("r2a", "both"):
-                topic.tags[TAG_ASSIGNEE].update(topic.tags[TAG_REVIEWER])
+                topic.tags[TAG_ASSIGNEE].update(
+                    r for r in topic.tags[TAG_REVIEWER] if not is_team(r)
+                )
             if auto_add_users in ("a2r", "both"):
                 topic.tags[TAG_REVIEWER].update(topic.tags[TAG_ASSIGNEE])
+
+            # Github does not support teams as assignees, so reject any team-style entries
+            # up front rather than silently ignoring them.
+            team_assignees = {a for a in topic.tags[TAG_ASSIGNEE] if is_team(a)}
+            if team_assignees:
+                raise RevupUsageException(
+                    f"Topic '{name}' has team(s) listed as assignees, but Github only allows"
+                    f" users as assignees: {sorted(team_assignees)}"
+                )
 
             # Track the last actually used topic for the relative-chain feature
             last_topic = name
@@ -1087,13 +1113,24 @@ class TopicStack:
 
         pr_targets = []
         user_ids = set()
+        team_refs: Set[str] = set()
         labels = set()
         for _, topic, base_branch, review in self.all_reviews_iter():
             pr_targets.append(review.remote_head)
-            user_ids |= topic.tags[TAG_REVIEWER]
+            for name in topic.tags[TAG_REVIEWER]:
+                if is_team(name):
+                    team_refs.add(name)
+                else:
+                    user_ids.add(name)
             user_ids |= topic.tags[TAG_ASSIGNEE]
             labels |= topic.tags[TAG_LABEL]
             labels.add(self.git_ctx.remove_branch_prefix(base_branch))
+
+        team_tuples = []
+        for team_ref in team_refs:
+            m = RE_TEAM.match(team_ref)
+            if m:
+                team_tuples.append((m.group("org"), m.group("slug")))
 
         relative_targets = set()
         # Add queries for relative branches at the end
@@ -1110,8 +1147,15 @@ class TopicStack:
             self.names_to_ids,
             self.names_to_logins,
             self.labels_to_ids,
+            self.teams_to_ids,
+            self.teams_to_members,
         ) = await github_utils.query_everything(
-            self.github_ep, self.repo_info, pr_targets, list(user_ids), list(labels)
+            self.github_ep,
+            self.repo_info,
+            pr_targets,
+            list(user_ids),
+            list(labels),
+            team_tuples,
         )
 
         i = 0
@@ -1171,7 +1215,13 @@ class TopicStack:
         """
         if not self.topics:
             return
-        if self.names_to_ids is None or self.names_to_logins is None or self.labels_to_ids is None:
+        if (
+            self.names_to_ids is None
+            or self.names_to_logins is None
+            or self.labels_to_ids is None
+            or self.teams_to_ids is None
+            or self.teams_to_members is None
+        ):
             raise RuntimeError("Need to query before updating")
 
         for topic in self.topics.values():
@@ -1221,12 +1271,39 @@ class TopicStack:
 
                 # Don't request reviewers that are already added, otherwise the request will clear
                 # the "reviewed" status in the UI.
+                user_reviewer_tags = {r for r in topic.tags[TAG_REVIEWER] if not is_team(r)}
+                team_reviewer_tags = {r for r in topic.tags[TAG_REVIEWER] if is_team(r)}
                 reviewer_ids = translate_if_exists(
-                    topic.tags[TAG_REVIEWER], self.names_to_ids
+                    user_reviewer_tags, self.names_to_ids
                 ).difference(review.pr_info.reviewer_ids)
                 reviewer_logins = translate_if_exists(
-                    topic.tags[TAG_REVIEWER], self.names_to_logins
+                    user_reviewer_tags, self.names_to_logins
                 ).difference(review.pr_info.reviewers)
+
+                # A team may have been "resolved" by Github's code review assignment (the team
+                # gets dropped from reviewRequests and individuals get added). Re-requesting
+                # the team would trigger auto-assignment again, so skip teams whose members
+                # are already among the existing reviewers.
+                teams_to_request = set()
+                for team_ref in team_reviewer_tags:
+                    if team_ref not in self.teams_to_ids:
+                        continue
+                    if team_ref in review.pr_info.reviewer_teams:
+                        # Team is still pending on the PR; nothing to do.
+                        continue
+                    members = self.teams_to_members.get(team_ref) if self.teams_to_members else None
+                    if members is not None and members & review.pr_info.reviewers:
+                        overlap = sorted(members & review.pr_info.reviewers)
+                        logging.warning(
+                            f"Not re-requesting team '{team_ref}' on "
+                            f"{review.pr_info.url or review.remote_head} because existing "
+                            f"reviewer(s) {overlap} are members of it. Re-requesting would trigger"
+                            " Github code review auto-assignment again."
+                        )
+                        continue
+                    teams_to_request.add(team_ref)
+                reviewer_team_ids = translate_if_exists(teams_to_request, self.teams_to_ids)
+                reviewer_team_refs = teams_to_request
 
                 assignee_ids = translate_if_exists(
                     topic.tags[TAG_ASSIGNEE], self.names_to_ids
@@ -1263,9 +1340,11 @@ class TopicStack:
                     review.pr_update.is_draft = review.is_draft
                 review.pr_update.label_ids = label_ids
                 review.pr_update.reviewer_ids = reviewer_ids
+                review.pr_update.reviewer_team_ids = reviewer_team_ids
                 review.pr_update.assignee_ids = assignee_ids
 
                 review.pr_info.reviewers |= reviewer_logins
+                review.pr_info.reviewer_teams |= reviewer_team_refs
                 review.pr_info.assignees |= assignee_logins
                 review.pr_info.labels |= valid_labels
 
@@ -1410,6 +1489,7 @@ class TopicStack:
                 or review.pr_update.body is not None
                 or review.pr_update.title is not None
                 or review.pr_update.reviewer_ids
+                or review.pr_update.reviewer_team_ids
                 or review.pr_update.assignee_ids
                 or review.pr_update.label_ids
                 or review.pr_update.is_draft is not None
@@ -1480,11 +1560,11 @@ class TopicStack:
                 if review.new_commits:
                     logging.debug(f"New head: {review.new_commits[-1]}")
 
-                reviewers = topic.tags[TAG_REVIEWER]
+                reviewers = set(topic.tags[TAG_REVIEWER])
                 assignees = topic.tags[TAG_ASSIGNEE]
                 labels = topic.tags[TAG_LABEL]
                 if review.pr_info:
-                    reviewers = review.pr_info.reviewers
+                    reviewers = review.pr_info.reviewers | review.pr_info.reviewer_teams
                     assignees = review.pr_info.assignees
                     labels = review.pr_info.labels
                 if reviewers:
