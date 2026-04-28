@@ -3,7 +3,14 @@ import argparse
 import pytest
 from git_env import GitTestEnvironment, async_test
 
-from revup.topic_stack import PrBodySource, TopicStack, format_remote_branch
+from revup.github_utils import PrInfo
+from revup.topic_stack import (
+    PrBodySource,
+    PrStatus,
+    PushStatus,
+    TopicStack,
+    format_remote_branch,
+)
 from revup.types import RevupConflictException, RevupUsageException
 
 
@@ -46,6 +53,7 @@ async def setup_repo(env):
 
 async def run_upload_pipeline(env, **kwargs):
     """Run the full upload dry-run pipeline and return the TopicStack for inspection."""
+    env.git_ctx.clear_cache()
     args = make_upload_args(**kwargs)
     topics = TopicStack(
         env.git_ctx,
@@ -837,3 +845,336 @@ class TestPrBodySource:
             body, title = topics._get_pr_body_and_title(topic, PrBodySource.TEMPLATE)
 
             assert body == ""
+
+
+def make_pr_info(review, base_branch="main"):
+    """Create a PrInfo that simulates an existing PR matching the review's current state."""
+    return PrInfo(
+        baseRef=base_branch,
+        headRef=review.remote_head,
+        baseRefOid=review.base_ref,
+        headRefOid=review.new_commits[-1],
+        body="",
+        title="",
+        state="OPEN",
+    )
+
+
+class TestRebaseDetection:
+    @async_test
+    async def test_identical_commits_detected_as_nochange(self):
+        """When local and remote are byte-for-byte identical, push should be skipped entirely."""
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            await env.commit("feat\n\nTopic: alpha", {"a.txt": "a"})
+
+            topics = await run_upload_pipeline(env)
+            review = topics.topics["alpha"].reviews["origin/main"]
+            review.pr_info = make_pr_info(review)
+
+            await topics.mark_rebases(skip_rebase=True)
+
+            assert review.push_status == PushStatus.NOCHANGE
+            assert review.is_pure_rebase
+
+    @async_test
+    async def test_reworded_commit_is_not_pure_rebase(self):
+        """Same diff but different commit message should still be pushed."""
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            await env.commit("original title\n\nTopic: alpha", {"a.txt": "a"})
+
+            # First "upload" — capture the remote state
+            first = await run_upload_pipeline(env)
+            first_review = first.topics["alpha"].reviews["origin/main"]
+            remote_head = first_review.new_commits[-1]
+            remote_base = first_review.base_ref
+
+            # Reword the commit (same diff, different message)
+            await env.git_ctx.git("commit", "--amend", "-m", "new title\n\nTopic: alpha")
+
+            # Re-run pipeline with the reworded commit
+            topics = await run_upload_pipeline(env)
+            review = topics.topics["alpha"].reviews["origin/main"]
+            review.pr_info = PrInfo(
+                baseRef="main",
+                headRef=review.remote_head,
+                baseRefOid=remote_base,
+                headRefOid=remote_head,
+                body="",
+                title="",
+                state="OPEN",
+            )
+
+            await topics.mark_rebases(skip_rebase=True)
+
+            assert not review.is_pure_rebase
+            assert review.push_status == PushStatus.PUSHED
+
+    @async_test
+    async def test_new_content_always_pushed(self):
+        """A commit with new file changes must always be pushed."""
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            await env.commit("feat\n\nTopic: alpha", {"a.txt": "v1"})
+
+            first = await run_upload_pipeline(env)
+            first_review = first.topics["alpha"].reviews["origin/main"]
+            remote_head = first_review.new_commits[-1]
+            remote_base = first_review.base_ref
+
+            # Amend with different content
+            await env.stage_file("a.txt", "v2")
+            await env.git_ctx.git("commit", "--amend", "-m", "feat\n\nTopic: alpha")
+
+            topics = await run_upload_pipeline(env)
+            review = topics.topics["alpha"].reviews["origin/main"]
+            review.pr_info = PrInfo(
+                baseRef="main",
+                headRef=review.remote_head,
+                baseRefOid=remote_base,
+                headRefOid=remote_head,
+                body="",
+                title="",
+                state="OPEN",
+            )
+
+            await topics.mark_rebases(skip_rebase=True)
+
+            assert not review.is_pure_rebase
+            assert review.push_status == PushStatus.PUSHED
+
+    @async_test
+    async def test_skip_rebase_skips_pure_rebase_on_moved_base(self):
+        """With skip_rebase=True, a pure rebase on a moved-forward base is marked REBASE."""
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            root = await env.get_commit_hash()
+            await env.commit("feat\n\nTopic: alpha", {"a.txt": "a"})
+
+            first = await run_upload_pipeline(env)
+            first_review = first.topics["alpha"].reviews["origin/main"]
+            remote_head = first_review.new_commits[-1]
+            remote_base = first_review.base_ref
+
+            # Advance origin/main independently, then rebase local onto it
+            await env.git_ctx.git("checkout", root)
+            await env.commit("upstream change", {"upstream.txt": "u"})
+            new_main = await env.get_commit_hash()
+            await env.git_ctx.git("branch", "origin/main", new_main, "-f")
+            await env.git_ctx.git("checkout", "main")
+            await env.git_ctx.git("rebase", "origin/main")
+
+            topics = await run_upload_pipeline(env)
+            review = topics.topics["alpha"].reviews["origin/main"]
+            review.pr_info = PrInfo(
+                baseRef="main",
+                headRef=review.remote_head,
+                baseRefOid=remote_base,
+                headRefOid=remote_head,
+                body="",
+                title="",
+                state="OPEN",
+            )
+
+            await topics.mark_rebases(skip_rebase=True)
+
+            assert review.is_pure_rebase
+            assert review.push_status == PushStatus.REBASE
+
+    @async_test
+    async def test_force_rebase_pushes_despite_pure_rebase(self):
+        """With skip_rebase=False (--rebase flag), even a pure rebase gets pushed."""
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            root = await env.get_commit_hash()
+            await env.commit("feat\n\nTopic: alpha", {"a.txt": "a"})
+
+            first = await run_upload_pipeline(env)
+            first_review = first.topics["alpha"].reviews["origin/main"]
+            remote_head = first_review.new_commits[-1]
+            remote_base = first_review.base_ref
+
+            # Advance and rebase
+            await env.git_ctx.git("checkout", root)
+            await env.commit("upstream", {"upstream.txt": "u"})
+            new_main = await env.get_commit_hash()
+            await env.git_ctx.git("branch", "origin/main", new_main, "-f")
+            await env.git_ctx.git("checkout", "main")
+            await env.git_ctx.git("rebase", "origin/main")
+
+            topics = await run_upload_pipeline(env)
+            review = topics.topics["alpha"].reviews["origin/main"]
+            review.pr_info = PrInfo(
+                baseRef="main",
+                headRef=review.remote_head,
+                baseRefOid=remote_base,
+                headRefOid=remote_head,
+                body="",
+                title="",
+                state="OPEN",
+            )
+
+            await topics.mark_rebases(skip_rebase=False)
+
+            assert review.is_pure_rebase
+            assert review.push_status == PushStatus.PUSHED
+
+    @async_test
+    async def test_merged_pr_with_new_content_becomes_new(self):
+        """If a PR was merged but local has genuinely new changes, it should be re-created."""
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            await env.commit("feat\n\nTopic: alpha", {"a.txt": "v1"})
+
+            first = await run_upload_pipeline(env)
+            first_review = first.topics["alpha"].reviews["origin/main"]
+            remote_head = first_review.new_commits[-1]
+            remote_base = first_review.base_ref
+
+            # Amend with new content
+            await env.stage_file("a.txt", "v2")
+            await env.git_ctx.git("commit", "--amend", "-m", "feat\n\nTopic: alpha")
+
+            topics = await run_upload_pipeline(env)
+            review = topics.topics["alpha"].reviews["origin/main"]
+            review.pr_info = PrInfo(
+                baseRef="main",
+                headRef=review.remote_head,
+                baseRefOid=remote_base,
+                headRefOid=remote_head,
+                body="",
+                title="",
+                state="MERGED",
+            )
+            review.status = PrStatus.MERGED
+
+            await topics.mark_rebases(skip_rebase=True)
+
+            assert review.status == PrStatus.NEW
+
+    @async_test
+    async def test_child_forces_parent_rebase_to_push(self):
+        """When a child topic has new content, its rebased parent must also be pushed."""
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            root = await env.get_commit_hash()
+            await env.commit("parent\n\nTopic: parent", {"p.txt": "p"})
+            await env.commit("child\n\nTopic: child\nRelative: parent", {"c.txt": "c1"})
+
+            first = await run_upload_pipeline(env)
+            parent_review = first.topics["parent"].reviews["origin/main"]
+            child_review = first.topics["child"].reviews["origin/main"]
+            parent_remote_head = parent_review.new_commits[-1]
+            parent_remote_base = parent_review.base_ref
+            child_remote_head = child_review.new_commits[-1]
+            child_remote_base = child_review.base_ref
+
+            # Advance origin/main independently, then rebase local onto it
+            await env.git_ctx.git("checkout", root)
+            await env.commit("upstream", {"u.txt": "u"})
+            new_main = await env.get_commit_hash()
+            await env.git_ctx.git("branch", "origin/main", new_main, "-f")
+            await env.git_ctx.git("checkout", "main")
+            await env.git_ctx.git("rebase", "origin/main")
+            # Amend child with new content
+            await env.stage_file("c.txt", "c2")
+            await env.git_ctx.git(
+                "commit", "--amend", "-m", "child\n\nTopic: child\nRelative: parent"
+            )
+
+            topics = await run_upload_pipeline(env)
+            p_review = topics.topics["parent"].reviews["origin/main"]
+            c_review = topics.topics["child"].reviews["origin/main"]
+
+            p_review.pr_info = PrInfo(
+                baseRef="main",
+                headRef=p_review.remote_head,
+                baseRefOid=parent_remote_base,
+                headRefOid=parent_remote_head,
+                body="",
+                title="",
+                state="OPEN",
+            )
+            c_review.pr_info = PrInfo(
+                baseRef=p_review.remote_head,
+                headRef=c_review.remote_head,
+                baseRefOid=child_remote_base,
+                headRefOid=child_remote_head,
+                body="",
+                title="",
+                state="OPEN",
+            )
+
+            await topics.mark_rebases(skip_rebase=True)
+
+            # Child has new content, so it must be pushed
+            assert c_review.push_status == PushStatus.PUSHED
+            # Parent would normally be REBASE, but child forces it to PUSHED
+            assert p_review.push_status == PushStatus.PUSHED
+
+    @async_test
+    async def test_multi_commit_topic_partial_change_is_not_rebase(self):
+        """Changing one commit in a multi-commit topic means it's not a rebase."""
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            await env.commit("c1\n\nTopic: alpha", {"a.txt": "a"})
+            await env.commit("c2\n\nTopic: alpha", {"b.txt": "b"})
+
+            first = await run_upload_pipeline(env)
+            first_review = first.topics["alpha"].reviews["origin/main"]
+            remote_head = first_review.new_commits[-1]
+            remote_base = first_review.base_ref
+
+            # Amend only the second commit (HEAD) with new content
+            await env.stage_file("b.txt", "b_new")
+            await env.git_ctx.git("commit", "--amend", "-m", "c2\n\nTopic: alpha")
+
+            topics = await run_upload_pipeline(env)
+            review = topics.topics["alpha"].reviews["origin/main"]
+            review.pr_info = PrInfo(
+                baseRef="main",
+                headRef=review.remote_head,
+                baseRefOid=remote_base,
+                headRefOid=remote_head,
+                body="",
+                title="",
+                state="OPEN",
+            )
+
+            await topics.mark_rebases(skip_rebase=True)
+
+            assert not review.is_pure_rebase
+            assert review.push_status == PushStatus.PUSHED
+
+    @async_test
+    async def test_commit_count_change_is_not_rebase(self):
+        """Adding a commit to a topic means it cannot be a rebase of the old state."""
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            await env.commit("c1\n\nTopic: alpha", {"a.txt": "a"})
+
+            first = await run_upload_pipeline(env)
+            first_review = first.topics["alpha"].reviews["origin/main"]
+            remote_head = first_review.new_commits[-1]
+            remote_base = first_review.base_ref
+
+            # Add a second commit to the same topic
+            await env.commit("c2\n\nTopic: alpha", {"b.txt": "b"})
+
+            topics = await run_upload_pipeline(env)
+            review = topics.topics["alpha"].reviews["origin/main"]
+            review.pr_info = PrInfo(
+                baseRef="main",
+                headRef=review.remote_head,
+                baseRefOid=remote_base,
+                headRefOid=remote_head,
+                body="",
+                title="",
+                state="OPEN",
+            )
+
+            await topics.mark_rebases(skip_rebase=True)
+
+            assert not review.is_pure_rebase
+            assert review.push_status == PushStatus.PUSHED
