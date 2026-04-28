@@ -46,6 +46,8 @@ class PrInfo:
     state: str = ""
     reviewers: Set[str] = field(default_factory=set)
     reviewer_ids: Set[str] = field(default_factory=set)
+    reviewer_teams: Set[str] = field(default_factory=set)
+    reviewer_team_ids: Set[str] = field(default_factory=set)
     assignees: Set[str] = field(default_factory=set)
     assignee_ids: Set[str] = field(default_factory=set)
     labels: Set[str] = field(default_factory=set)
@@ -66,6 +68,7 @@ class PrUpdate:
     title: Optional[str] = None
     id: str = ""
     reviewer_ids: Set[str] = field(default_factory=set)
+    reviewer_team_ids: Set[str] = field(default_factory=set)
     assignee_ids: Set[str] = field(default_factory=set)
     label_ids: Set[str] = field(default_factory=set)
     is_draft: Optional[bool] = None
@@ -115,7 +118,16 @@ async def query_everything(
     head_refs: List[str],
     user_ids: List[str],
     labels: List[str],
-) -> Tuple[str, List[Optional[PrInfo]], Dict[str, str], Dict[str, str], Dict[str, str]]:
+    teams: List[Tuple[str, str]],
+) -> Tuple[
+    str,
+    List[Optional[PrInfo]],
+    Dict[str, str],
+    Dict[str, str],
+    Dict[str, str],
+    Dict[str, str],
+    Dict[str, Optional[Set[str]]],
+]:
     """
     This function does all necessary graphql querying in one request. This dramatically reduces the
     amount of time spent on querying.
@@ -126,19 +138,27 @@ async def query_everything(
     - Dict of user_ids as given to graphql node ids
     - Dict of user_ids as given to their full login name
     - Dict of labels to their graphql node ids
+    - Dict of "org/slug" team refs to graphql node ids
+    - Dict of "org/slug" team refs to their member logins. None if the team has more members
+      than we fetched (meaning membership is unknown / incomplete).
     """
     head_refs_args = get_args_dict(head_refs, "pr")
     user_id_args = get_args_dict(user_ids, "user")
     label_args = get_args_dict(labels, "label")
+    team_org_args = get_args_dict([t[0] for t in teams], "team_org")
+    team_slug_args = get_args_dict([t[1] for t in teams], "team_slug")
 
     prs_out = get_result_args(len(head_refs), "pr_out")
     user_id_out = get_result_args(len(user_ids), "user_out")
     label_out = get_result_args(len(labels), "label_out")
+    team_out = get_result_args(len(teams), "team_out")
 
     arg_str = ", ".join(
         get_args_declaration(head_refs_args, "String!")
         + get_args_declaration(user_id_args, "String!")
         + get_args_declaration(label_args, "String!")
+        + get_args_declaration(team_org_args, "String!")
+        + get_args_declaration(team_slug_args, "String!")
     )
 
     # NOTE: There are possible limitations here because we depend on PRs being returned in order of
@@ -164,12 +184,21 @@ async def query_everything(
     label_str = "".join(len(labels) * ["{}: label (name: ${}) {{...LabelResult}},"])
     label_str = label_str.format(*zip_and_flatten(label_out, label_args.keys()))
 
+    team_str = ""
+    for i in range(len(teams)):
+        team_str += (
+            f"{team_out[i]}: organization(login: ${list(team_org_args.keys())[i]}) "
+            f"{{team(slug: ${list(team_slug_args.keys())[i]}) "
+            f"{{id, members(first: 100) {{nodes {{login}}, totalCount}}}}}},"
+        )
+
     multi_query_str = f"""
         query GetPrResults($owner: String!, $name: String!, {arg_str}) {{
             repository(name: $name, owner: $owner) {{
                 id
                 {request_str}{user_str}{label_str}
             }}
+            {team_str}
         }}"""
     if user_str:
         multi_query_str += """
@@ -222,6 +251,13 @@ async def query_everything(
                                 login
                                 id
                             }}
+                            ... on Team {{
+                                slug
+                                id
+                                organization {{
+                                    login
+                                }}
+                            }}
                         }}
                     }}
                 }}
@@ -267,6 +303,8 @@ async def query_everything(
         **head_refs_args,
         **user_id_args,
         **label_args,
+        **team_org_args,
+        **team_slug_args,
     )
 
     prs: List[Optional[PrInfo]] = []
@@ -278,17 +316,23 @@ async def query_everything(
             pr_label_ids = set()
             reviewers = set()
             reviewer_ids = set()
+            reviewer_teams = set()
+            reviewer_team_ids = set()
             assignees = set()
             assignee_ids = set()
             for label in this_node["labels"]["nodes"]:
                 pr_labels.add(label["name"])
                 pr_label_ids.add(label["id"])
             for revs in this_node["reviewRequests"]["nodes"]:
-                if not revs["requestedReviewer"]:
+                requested = revs["requestedReviewer"]
+                if not requested:
                     continue
-                elif "login" in revs["requestedReviewer"]:
-                    reviewers.add(revs["requestedReviewer"]["login"])
-                    reviewer_ids.add(revs["requestedReviewer"]["id"])
+                elif "slug" in requested:
+                    reviewer_teams.add(f"{requested['organization']['login']}/{requested['slug']}")
+                    reviewer_team_ids.add(requested["id"])
+                elif "login" in requested:
+                    reviewers.add(requested["login"])
+                    reviewer_ids.add(requested["id"])
             for revs in this_node["latestReviews"]["nodes"]:
                 # Ignore self reviews and bot reviews (without a login)
                 if not revs["viewerDidAuthor"] and "login" in revs["author"]:
@@ -329,6 +373,8 @@ async def query_everything(
                     title=this_node["title"],
                     reviewers=reviewers,
                     reviewer_ids=reviewer_ids,
+                    reviewer_teams=reviewer_teams,
+                    reviewer_team_ids=reviewer_team_ids,
                     assignees=assignees,
                     assignee_ids=assignee_ids,
                     labels=pr_labels,
@@ -376,12 +422,31 @@ async def query_everything(
         else:
             logging.warning("Couldn't find an existing label named {}".format(label))
 
+    teams_to_ids = {}
+    teams_to_members: Dict[str, Optional[Set[str]]] = {}
+    for i, (org, slug) in enumerate(teams):
+        team_node = pr_result["data"][team_out[i]]
+        if team_node is not None and team_node["team"] is not None:
+            team_ref = f"{org}/{slug}"
+            teams_to_ids[team_ref] = team_node["team"]["id"]
+            members_node = team_node["team"]["members"]
+            member_logins = {m["login"] for m in members_node["nodes"]}
+            if members_node["totalCount"] > len(members_node["nodes"]):
+                # Team has more members than we fetched; we can't check membership reliably.
+                teams_to_members[team_ref] = None
+            else:
+                teams_to_members[team_ref] = member_logins
+        else:
+            logging.warning("Couldn't find a team matching {}/{}".format(org, slug))
+
     return (
         pr_result["data"]["repository"]["id"],
         prs,
         names_to_ids,
         names_to_logins,
         labels_to_ids,
+        teams_to_ids,
+        teams_to_members,
     )
 
 
@@ -474,9 +539,10 @@ async def update_pull_requests(github_ep: github.GitHubEndpoint, prs: List[PrUpd
                 "labelableId": pr.id,
             })
 
-        if pr.reviewer_ids:
+        if pr.reviewer_ids or pr.reviewer_team_ids:
             reviewers.append({
                 "userIds": list(pr.reviewer_ids),
+                "teamIds": list(pr.reviewer_team_ids),
                 "clientMutationId": "revup",
                 "pullRequestId": pr.id,
                 "union": True,
