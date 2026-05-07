@@ -72,7 +72,8 @@ def make_toplevel_parser() -> RevupArgParser:
 def get_config_path() -> str:
     home_path = os.path.expanduser("~")
     return os.environ.get(
-        os.path.expanduser(REVUP_CONFIG_ENV_VAR), os.path.join(home_path, CONFIG_FILE_NAME)
+        os.path.expanduser(REVUP_CONFIG_ENV_VAR),
+        os.path.join(home_path, CONFIG_FILE_NAME),
     )
 
 
@@ -198,7 +199,9 @@ def build_parser() -> Tuple[RevupArgParser, List[RevupArgParser]]:
     )
     upload_parser.add_argument("--uploader")
     upload_parser.add_argument(
-        "--branch-format", choices=["user+branch", "user", "branch", "none"], default="user+branch"
+        "--branch-format",
+        choices=["user+branch", "user", "branch", "none"],
+        default="user+branch",
     )
     upload_parser.add_argument("--pre-upload", "-p")
     upload_parser.add_argument("--relative-chain", "-c", action="store_true")
@@ -221,6 +224,7 @@ def build_parser() -> Tuple[RevupArgParser, List[RevupArgParser]]:
     amend_parser.add_argument("--edit", "-s", default=True, action="store_true")
     amend_parser.add_argument("--insert", "-i", action="store_true")
     amend_parser.add_argument("--drop", "-d", action="store_true")
+    amend_parser.add_argument("--last-touched", "-l", action="store_true")
     amend_parser.add_argument("--all", "-a", action="store_true")
 
     amend_parser.add_argument("--parse-topics", default=True, action="store_true")
@@ -246,7 +250,10 @@ def build_parser() -> Tuple[RevupArgParser, List[RevupArgParser]]:
         "detect-branch", description="Detect the base branch of the current branch."
     )
     detect_branch.add_argument(
-        "--show-all", "-s", action="store_true", help="Show all candidates, not just the best one"
+        "--show-all",
+        "-s",
+        action="store_true",
+        help="Show all candidates, not just the best one",
     )
     detect_branch.add_argument(
         "--no-limit", "-n", action="store_true", help="Don't limit to release branches"
@@ -273,17 +280,22 @@ def build_parser() -> Tuple[RevupArgParser, List[RevupArgParser]]:
     )
     toolkit_fork_point.add_argument("branches", nargs=2, help="Branches to compare")
     toolkit_closest_branch = toolkit_subparsers.add_parser(
-        "closest-branch", description="Find the nearest base branch to the given commit."
+        "closest-branch",
+        description="Find the nearest base branch to the given commit.",
     )
     toolkit_closest_branch.add_argument("branch", nargs=1, help="Commit/branch")
     toolkit_closest_branch.add_argument(
-        "--allow-self", action="store_true", help='Allow the branch itself to be a valid "closest"'
+        "--allow-self",
+        action="store_true",
+        help='Allow the branch itself to be a valid "closest"',
     )
     toolkit_list_topics = toolkit_subparsers.add_parser(
         "list-topics", description="List all topics and their commits"
     )
     toolkit_list_topics.add_argument(
-        "--base-branch", "-b", help="Use the given branch as the base instead of autodetecting."
+        "--base-branch",
+        "-b",
+        help="Use the given branch as the base instead of autodetecting.",
     )
     toolkit_list_topics.add_argument(
         "--relative-branch", "-e", help="Use the given relative branch."
