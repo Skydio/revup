@@ -1322,7 +1322,7 @@ class TopicStack:
     def populate_review_graph(self) -> None:
         # Create the review graph after populating PrInfos for new topics
         review_graph = self.create_review_graph()
-        for _, _, _, review in self.all_reviews_iter():
+        for _, topic, base_branch, review in self.all_reviews_iter():
             if (
                 review.review_graph_index is None
                 or not review.pr_info
@@ -1330,12 +1330,31 @@ class TopicStack:
             ):
                 continue
             review_title = review.pr_update.title or review.pr_info.title
-            review_graph_text = REVIEW_GRAPH_FIRST_LINE + (
-                review_graph[review.remote_head][0].replace(
-                    f"{review.pr_info.url} {review_title}",
-                    f"**{review.pr_info.url} {review_title}**",
-                )
+
+            # Build the graph for the current branch
+            current_graph = review_graph[review.remote_head][0].replace(
+                f"{review.pr_info.url} {review_title}",
+                f"**{review.pr_info.url} {review_title}**",
             )
+            branch_label = self.git_ctx.remove_branch_prefix(base_branch)
+            has_other_branches = len(topic.reviews) > 1
+
+            if has_other_branches:
+                review_graph_text = f"{REVIEW_GRAPH_FIRST_LINE}**{branch_label}:**\n{current_graph}"
+            else:
+                review_graph_text = REVIEW_GRAPH_FIRST_LINE + current_graph
+
+            # Append graphs from other branches this topic also targets
+            for other_branch, other_review in topic.reviews.items():
+                if other_branch == base_branch:
+                    continue
+                if other_review.remote_head not in review_graph:
+                    continue
+                other_label = self.git_ctx.remove_branch_prefix(other_branch)
+                review_graph_text += (
+                    f"\n**{other_label}:**\n{review_graph[other_review.remote_head][0]}"
+                )
+
             if len(review.pr_info.comments) > review.review_graph_index:
                 if review_graph_text != review.pr_info.comments[review.review_graph_index].text:
                     # edit existing comment
@@ -1386,7 +1405,11 @@ class TopicStack:
             # Create all prs in one request. These will most likely end up being modified
             # later since its not possible to add labels or reviewers at creation time.
             await github_utils.create_pull_requests(
-                self.github_ep, self.repo_id, self.repo_info, self.fork_info, prs_to_create
+                self.github_ep,
+                self.repo_id,
+                self.repo_info,
+                self.fork_info,
+                prs_to_create,
             )
 
     async def update_prs(self) -> None:
