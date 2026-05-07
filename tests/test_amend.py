@@ -19,6 +19,7 @@ def make_amend_args(**kwargs):
         "edit": False,
         "insert": False,
         "drop": False,
+        "last_touched": False,
         "all": False,
         "base_branch": None,
         "relative_branch": None,
@@ -693,3 +694,173 @@ class TestAmendNonAncestor:
             args = make_amend_args(ref_or_topic=side_hash, edit=False)
             with pytest.raises(RevupUsageException, match="not a first parent ancestor"):
                 await amend.main(args, env.git_ctx)
+
+
+class TestAmendLastTouched:
+    @async_test
+    async def test_amends_file_into_last_commit_that_touched_it(self):
+        async with GitTestEnvironment() as env:
+            await env.commit("root", {"root.txt": "r"})
+            await env.git_ctx.git("branch", "origin/main", "HEAD")
+            await env.commit("first\n\nTopic: alpha", {"a.txt": "v1"})
+            await env.commit("second\n\nTopic: beta", {"b.txt": "v1"})
+
+            await env.stage_file("a.txt", "v2")
+            args = make_amend_args(last_touched=True, parse_topics=True)
+            await amend.main(args, env.git_ctx)
+
+            # a.txt should be amended into "first" (HEAD~1), not HEAD
+            content = await env.get_file_at_commit("a.txt", "HEAD~1")
+            assert content == "v2"
+            # b.txt should be unchanged
+            content_b = await env.get_file_at_commit("b.txt", "HEAD")
+            assert content_b == "v1"
+
+    @async_test
+    async def test_multiple_files_to_different_commits(self):
+        async with GitTestEnvironment() as env:
+            await env.commit("root", {"root.txt": "r"})
+            await env.git_ctx.git("branch", "origin/main", "HEAD")
+            await env.commit("first\n\nTopic: alpha", {"a.txt": "a1"})
+            await env.commit("second\n\nTopic: beta", {"b.txt": "b1"})
+            await env.commit("third\n\nTopic: gamma", {"c.txt": "c1"})
+
+            await env.stage_file("a.txt", "a2")
+            await env.stage_file("b.txt", "b2")
+            await env.stage_file("c.txt", "c2")
+            args = make_amend_args(last_touched=True, parse_topics=True)
+            await amend.main(args, env.git_ctx)
+
+            assert await env.get_file_at_commit("a.txt", "HEAD~2") == "a2"
+            assert await env.get_file_at_commit("b.txt", "HEAD~1") == "b2"
+            assert await env.get_file_at_commit("c.txt", "HEAD") == "c2"
+
+    @async_test
+    async def test_file_not_in_stack_remains_staged(self):
+        async with GitTestEnvironment() as env:
+            await env.commit("root", {"root.txt": "r"})
+            await env.git_ctx.git("branch", "origin/main", "HEAD")
+            await env.commit("first\n\nTopic: alpha", {"a.txt": "a1"})
+
+            # Stage a file that no commit in the stack touched
+            await env.stage_file("new.txt", "new content")
+            args = make_amend_args(last_touched=True, parse_topics=True)
+            await amend.main(args, env.git_ctx)
+
+            # new.txt should still be staged
+            assert await env.has_staged_changes()
+            staged = await env.get_staged_files()
+            assert "new.txt" in staged
+
+    @async_test
+    async def test_uses_most_recent_commit_for_file(self):
+        """If multiple commits touch the same file, amend into the most recent one."""
+        async with GitTestEnvironment() as env:
+            await env.commit("root", {"root.txt": "r"})
+            await env.git_ctx.git("branch", "origin/main", "HEAD")
+            await env.commit("first\n\nTopic: alpha", {"a.txt": "v1"})
+            await env.commit("second\n\nTopic: beta", {"a.txt": "v2"})
+
+            await env.stage_file("a.txt", "v3")
+            args = make_amend_args(last_touched=True, parse_topics=True)
+            await amend.main(args, env.git_ctx)
+
+            # Should go into "second" (HEAD), the most recent to touch a.txt
+            assert await env.get_file_at_commit("a.txt", "HEAD") == "v3"
+            # "first" keeps its original content
+            assert await env.get_file_at_commit("a.txt", "HEAD~1") == "v1"
+
+    @async_test
+    async def test_preserves_commit_messages(self):
+        async with GitTestEnvironment() as env:
+            await env.commit("root", {"root.txt": "r"})
+            await env.git_ctx.git("branch", "origin/main", "HEAD")
+            await env.commit("first msg\n\nTopic: alpha", {"a.txt": "a1"})
+            await env.commit("second msg\n\nTopic: beta", {"b.txt": "b1"})
+
+            await env.stage_file("a.txt", "a2")
+            args = make_amend_args(last_touched=True, parse_topics=True)
+            await amend.main(args, env.git_ctx)
+
+            msg1 = await env.get_commit_message("HEAD~1")
+            msg2 = await env.get_commit_message("HEAD")
+            assert "first msg" in msg1
+            assert "second msg" in msg2
+
+    @async_test
+    async def test_noop_when_no_staged_files(self):
+        async with GitTestEnvironment() as env:
+            await env.commit("root", {"root.txt": "r"})
+            await env.git_ctx.git("branch", "origin/main", "HEAD")
+            await env.commit("first\n\nTopic: alpha", {"a.txt": "a1"})
+
+            original_hash = await env.get_commit_hash()
+            args = make_amend_args(last_touched=True, parse_topics=True)
+            await amend.main(args, env.git_ctx)
+
+            assert await env.get_commit_hash() == original_hash
+
+    @async_test
+    async def test_mutually_exclusive_with_ref_or_topic(self):
+        async with GitTestEnvironment() as env:
+            await env.commit("root", {"root.txt": "r"})
+            await env.git_ctx.git("branch", "origin/main", "HEAD")
+            await env.commit("first\n\nTopic: alpha", {"a.txt": "a1"})
+
+            await env.stage_file("a.txt", "a2")
+            args = make_amend_args(last_touched=True, parse_topics=True, ref_or_topic="HEAD")
+            with pytest.raises(RevupUsageException, match="mutually exclusive"):
+                await amend.main(args, env.git_ctx)
+
+    @async_test
+    async def test_mutually_exclusive_with_drop(self):
+        async with GitTestEnvironment() as env:
+            await env.commit("root", {"root.txt": "r"})
+            await env.git_ctx.git("branch", "origin/main", "HEAD")
+            await env.commit("first\n\nTopic: alpha", {"a.txt": "a1"})
+
+            await env.stage_file("a.txt", "a2")
+            args = make_amend_args(last_touched=True, parse_topics=True, drop=True)
+            with pytest.raises(RevupUsageException, match="mutually exclusive"):
+                await amend.main(args, env.git_ctx)
+
+    @async_test
+    async def test_requires_parse_topics(self):
+        async with GitTestEnvironment() as env:
+            await env.commit("root", {"root.txt": "r"})
+            await env.git_ctx.git("branch", "origin/main", "HEAD")
+            await env.commit("first\n\nTopic: alpha", {"a.txt": "a1"})
+
+            await env.stage_file("a.txt", "a2")
+            args = make_amend_args(last_touched=True, parse_topics=False)
+            with pytest.raises(RevupUsageException, match="requires --parse-topics"):
+                await amend.main(args, env.git_ctx)
+
+    @async_test
+    async def test_works_with_subdirectories(self):
+        async with GitTestEnvironment() as env:
+            await env.commit("root", {"root.txt": "r"})
+            await env.git_ctx.git("branch", "origin/main", "HEAD")
+            await env.commit("first\n\nTopic: alpha", {"src/lib/a.txt": "a1"})
+            await env.commit("second\n\nTopic: beta", {"src/lib/b.txt": "b1"})
+
+            await env.stage_file("src/lib/a.txt", "a2")
+            args = make_amend_args(last_touched=True, parse_topics=True)
+            await amend.main(args, env.git_ctx)
+
+            assert await env.get_file_at_commit("src/lib/a.txt", "HEAD~1") == "a2"
+            assert await env.get_file_at_commit("src/lib/b.txt", "HEAD") == "b1"
+
+    @async_test
+    async def test_with_all_flag_stages_unstaged_changes(self):
+        async with GitTestEnvironment() as env:
+            await env.commit("root", {"root.txt": "r"})
+            await env.git_ctx.git("branch", "origin/main", "HEAD")
+            await env.commit("first\n\nTopic: alpha", {"a.txt": "a1"})
+
+            # Modify without staging
+            await env.write_file("a.txt", "a2")
+            args = make_amend_args(last_touched=True, parse_topics=True, **{"all": True})
+            await amend.main(args, env.git_ctx)
+
+            assert await env.get_file_at_commit("a.txt", "HEAD") == "a2"
