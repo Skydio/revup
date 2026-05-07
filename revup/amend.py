@@ -4,10 +4,13 @@ import logging
 import re
 import shlex
 import subprocess
+from collections import defaultdict
+from typing import Dict, List, Set
 
 from revup import git, topic_stack
 from revup.types import (
     CommitHeader,
+    GitCommitHash,
     GitConflictException,
     GitTreeHash,
     RevupConflictException,
@@ -24,7 +27,12 @@ with '{}' will be ignored, and an empty message aborts the amend."""
 
 
 async def invoke_editor_for_commit_msg(
-    git_ctx: git.Git, editor: str, topic_summary: str, commit_msg: str, cache_stat: str, stat: str
+    git_ctx: git.Git,
+    editor: str,
+    topic_summary: str,
+    commit_msg: str,
+    cache_stat: str,
+    stat: str,
 ) -> str:
     """
     Allow the user to modify the given commit msg by opening an editor.
@@ -129,6 +137,89 @@ async def parse_ref_or_topic(
         raise RevupUsageException("Can't have both --no-parse-refs and --no-parse-topics!")
 
 
+async def replay_cherry_pick(
+    git_ctx: git.Git, commit_obj: CommitHeader, new_parent: GitCommitHash
+) -> GitCommitHash:
+    try:
+        return await git_ctx.synthetic_cherry_pick_from_commit(commit_obj, new_parent)
+    except GitConflictException as exc:
+        await git_ctx.dump_conflict(exc)
+        raise RevupConflictException(
+            commit_obj,
+            new_parent,
+            "You may need to `git rebase -i` to resolve these conflicts!",
+        ) from exc
+
+
+async def rebuild_stack_last_touched(
+    git_ctx: git.Git, stack: List[CommitHeader], staged_files: Set[str]
+) -> GitCommitHash:
+    """
+    Rebuild the stack, amending each staged file into the most recent commit that touched it.
+    Returns the new HEAD commit.
+    """
+    # Map each staged file to its most recent commit in the stack (ordered oldest-first)
+    file_to_commit: Dict[str, int] = {}
+    for i, commit_obj in enumerate(stack):
+        touched = await git_ctx.git_stdout(
+            "diff-tree",
+            "--no-commit-id",
+            "--name-only",
+            "-r",
+            "--no-renames",
+            commit_obj.commit_id,
+        )
+        for f in touched.split("\n"):
+            if f and f in staged_files:
+                file_to_commit[f] = i
+
+    commit_to_files: Dict[int, Set[str]] = defaultdict(set)
+    for f, idx in file_to_commit.items():
+        commit_to_files[idx].add(f)
+
+    files_to_amend = set(file_to_commit.keys())
+    if not files_to_amend:
+        return GitCommitHash("")
+
+    # Get index entries for each staged file (format: <mode> <blob> <stage>\t<path>)
+    staged_entries: Dict[str, str] = {}
+    ls_output = await git_ctx.git_stdout("ls-files", "--stage", "--", *files_to_amend)
+    for line in ls_output.split("\n"):
+        if not line:
+            continue
+        _, path = line.split("\t", 1)
+        staged_entries[path] = line
+
+    tmp_index = git_ctx.get_scratch_dir() + "/last_touched_index"
+
+    new_commit = GitCommitHash(stack[0].parents[0]) if stack[0].parents else GitCommitHash("")
+    for i, commit_obj in enumerate(stack):
+        if i in commit_to_files:
+            idx_env = {"GIT_INDEX_FILE": tmp_index}
+            await git_ctx.git("read-tree", commit_obj.tree, env=idx_env)
+            update_lines = [staged_entries[f] for f in commit_to_files[i]]
+            await git_ctx.git(
+                "update-index",
+                "--index-info",
+                env=idx_env,
+                input_str="\n".join(update_lines) + "\n",
+            )
+            new_tree = GitTreeHash(await git_ctx.git_stdout("write-tree", env=idx_env))
+            amended = CommitHeader(new_tree, [new_commit])
+            amended.author_name = commit_obj.author_name
+            amended.author_email = commit_obj.author_email
+            amended.author_date = commit_obj.author_date
+            amended.committer_name = commit_obj.committer_name
+            amended.committer_email = commit_obj.committer_email
+            amended.committer_date = commit_obj.committer_date
+            amended.commit_msg = commit_obj.commit_msg
+            new_commit = await git_ctx.commit_tree(amended)
+        else:
+            new_commit = await replay_cherry_pick(git_ctx, commit_obj, new_commit)
+
+    return new_commit
+
+
 async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
     """
     Amend the given commit and recreate the history on top of that commit to make
@@ -147,11 +238,22 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
 
     args.edit = args.edit or args.insert
     has_diff = has_staged or has_unstaged or args.drop
-    if not has_diff and not args.edit:
+    if not has_diff and not args.edit and not args.last_touched:
         return 0
 
     if args.drop and args.insert:
         raise RevupUsageException("Doesn't make sense to drop and insert")
+
+    if args.last_touched and (args.insert or args.drop):
+        raise RevupUsageException("--last-touched is mutually exclusive with --insert and --drop")
+
+    if args.last_touched and args.ref_or_topic:
+        raise RevupUsageException(
+            "--last-touched is mutually exclusive with providing a ref_or_topic"
+        )
+
+    if args.last_touched and not args.parse_topics:
+        raise RevupUsageException("--last-touched requires --parse-topics")
 
     if has_unstaged:
         await git_ctx.git("add", "--update")
@@ -163,6 +265,35 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
         None,
         None,
     )
+
+    if args.last_touched:
+        staged_files_output = await git_ctx.git_stdout(
+            "diff", "--cached", "--name-only", "--no-renames"
+        )
+        if not staged_files_output:
+            return 0
+
+        await topics.populate_topics()
+        if not topics.commits:
+            return 0
+
+        fork = await git_ctx.fork_point("HEAD", topics.relative_branch)
+        stack = git.parse_rev_list(
+            await git_ctx.rev_list(
+                "HEAD", fork, header=True, first_parent=True, exclude_first_parent=True
+            )
+        )
+        if not stack:
+            return 0
+
+        staged_files = set(staged_files_output.split("\n"))
+        new_commit = await rebuild_stack_last_touched(git_ctx, stack, staged_files)
+        if not new_commit:
+            return 0
+
+        await git_ctx.soft_reset(new_commit, {"GIT_REFLOG_ACTION": "revup amend --last-touched"})
+        return 0
+
     if args.ref_or_topic:
         commit = await parse_ref_or_topic(args.ref_or_topic, args, git_ctx, topics)
 
@@ -180,7 +311,11 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
 
     stack = git.parse_rev_list(
         await git_ctx.rev_list(
-            "HEAD", f"{commit}~", header=True, first_parent=True, exclude_first_parent=True
+            "HEAD",
+            f"{commit}~",
+            header=True,
+            first_parent=True,
+            exclude_first_parent=True,
         )
     )
     if len(stack) == 0:
@@ -258,17 +393,7 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
                     # don't actually have to apply a patch.
                     new_commit = await git_ctx.cherry_pick_from_tree(commit_obj, new_commit)
                 else:
-                    try:
-                        new_commit = await git_ctx.synthetic_cherry_pick_from_commit(
-                            commit_obj, new_commit
-                        )
-                    except GitConflictException as exc:
-                        await git_ctx.dump_conflict(exc)
-                        raise RevupConflictException(
-                            commit_obj,
-                            new_commit,
-                            "You may need to `git rebase -i` to resolve these conflicts!",
-                        ) from exc
+                    new_commit = await replay_cherry_pick(git_ctx, commit_obj, new_commit)
     else:
         # If there's no diff (only text changed), its much faster to use the same trees
         new_commit = stack[0].parents[0]
