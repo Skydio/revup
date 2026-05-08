@@ -45,16 +45,6 @@ RE_COMMIT_HASH = re.compile(r"^[0-9a-f]{8,}")
 
 HEAD_COMMIT = GitCommitHash("HEAD")
 
-GIT_DIFF_ARGS = [
-    "--no-pager",
-    "diff",
-    "--full-index",
-    "--no-color",
-    "--no-textconv",
-    "--no-ext-diff",
-    "-U1",
-]
-
 GIT_ENV_NOCONFIG = {
     "HOME": "/dev/null",
     "GIT_CONFIG_NOSYSTEM": "1",
@@ -167,7 +157,14 @@ async def make_git(
             ret = os.environ.get("GIT_EDITOR", os.environ.get("EDITOR", "nano"))
         return ret
 
-    repo_root, git_dir, actual_version, email, editor, main_exists = await asyncio.gather(
+    (
+        repo_root,
+        git_dir,
+        actual_version,
+        email,
+        editor,
+        main_exists,
+    ) = await asyncio.gather(
         git_ctx.git_stdout("rev-parse", "--show-toplevel"),
         git_ctx.git_stdout("rev-parse", "--path-format=absolute", "--git-dir"),
         git_ctx.git_stdout("--version"),
@@ -266,6 +263,7 @@ class Git:
         self.fork_point.cache_clear()  # pylint: disable=no-member
         self.distance_to_fork_point.cache_clear()  # pylint: disable=no-member
         self.have_identical_trees.cache_clear()  # pylint: disable=no-member
+        self.merge_tree.cache_clear()  # pylint: disable=no-member
 
     def get_scratch_dir(self) -> str:
         """
@@ -571,40 +569,86 @@ class Git:
             "GIT_COMMITTER_DATE": commit_info.committer_date,
         }
         git_env = {k: v for k, v in git_env.items() if v != ""}
-        commit_tree_args = ["commit-tree", commit_info.tree, "-m", commit_info.commit_msg]
+        commit_tree_args = [
+            "commit-tree",
+            commit_info.tree,
+            "-m",
+            commit_info.commit_msg,
+        ]
         for p in commit_info.parents:
             commit_tree_args.extend(["-p", p])
         ret = await self.git_stdout(*commit_tree_args, env=git_env)
         return GitCommitHash(ret)
 
-    async def get_patch_id(
+    @lru_cache(maxsize=None)
+    async def merge_tree(
         self,
-        commit: GitCommitHash,
-    ) -> str:
+        merge_base: GitCommitHash,
+        tree1: GitCommitHash,
+        tree2: GitCommitHash,
+        strategy: Optional[str] = None,
+    ) -> Tuple[GitTreeHash, Optional[List[GitConflict]]]:
         """
-        Return a patch-id that uniquely identifies this commit's diff (but not its other metadata).
+        Run merge-tree and return the resulting tree hash and any conflicts.
+        Conflicts is None if merge succeeded (ret 0), or a list (possibly empty) on conflict.
         """
-        patch_source = (
-            [
-                self.git_path,
-            ]
-            + GIT_DIFF_ARGS
-            + [
-                commit + "~",
-                commit,
-            ]
-        )
-        ret = (
-            await self.sh.piped_sh(
-                patch_source,
-                [self.git_path, "patch-id", "--verbatim"],
-                env1=GIT_ENV_NOCONFIG,
-                env2=GIT_ENV_NOCONFIG,
+        args = [
+            "merge-tree",
+            "--write-tree",
+            "--messages",
+            "-z",
+            "--merge-base",
+            merge_base,
+        ]
+        if strategy is not None:
+            args.extend([f"-X{strategy}"])
+        args.extend([tree1, tree2])
+
+        ret, stdout = await self.git(*args, no_config=True, raiseonerror=False)
+        if ret > 1:
+            raise RuntimeError(f"Unexpected / unknown error in git {args} {ret}")
+
+        sections = stdout.split("\0\0")
+        subsections = [s.split("\0") for s in sections]
+        tree_hash = GitTreeHash(subsections[0][0])
+
+        if ret == 0:
+            return tree_hash, None
+
+        conflicts: List[GitConflict] = []
+        informational = subsections[1]
+        i = 0
+        while i < len(informational) - 1:
+            num_paths = int(informational[i])
+            conflicts.append(
+                GitConflict(
+                    informational[i + 1 + num_paths],
+                    informational[i + 2 + num_paths].strip(),
+                    informational[i + 1 : i + 1 + num_paths],
+                )
             )
-        )[1].split()
-        # If the diff is empty, patch id will return nothing. We just use that as the patch-id since
-        # it fulfills the requirement of matching other empty diffs.
-        return ret[0] if ret else ""
+            i += num_paths + 3
+
+        return tree_hash, conflicts
+
+    async def commits_are_equivalent(
+        self,
+        local_commit: CommitHeader,
+        remote_commit: CommitHeader,
+    ) -> bool:
+        """
+        Check if local_commit produces the same diff as remote_commit by applying
+        local_commit onto remote_commit's parent via merge-tree and comparing trees.
+        """
+        if not local_commit.parents or not remote_commit.parents:
+            return False
+
+        result_tree, conflicts = await self.merge_tree(
+            local_commit.parents[0],
+            local_commit.commit_id,
+            remote_commit.parents[0],
+        )
+        return conflicts is None and result_tree == remote_commit.tree
 
     async def get_diff_summary(
         self,
@@ -631,50 +675,15 @@ class Git:
         Perform a combined git merge-tree and commit-tree, returning a git commit hash. Raises
         GitConflictException if there are conflicts while merging the trees.
         """
-        args = [
-            "merge-tree",
-            "--write-tree",
-            "--messages",
-            "-z",
-            "--merge-base",
-            merge_base,
-        ]
-        if strategy is not None:
-            args.extend([f"-X{strategy}"])
-        args.extend([tree1, tree2])
+        tree_hash, conflicts = await self.merge_tree(merge_base, tree1, tree2, strategy)
 
-        ret, stdout = await self.git(*args, no_config=True, raiseonerror=False)
-
-        # See man page for git merge-tree for a complete breakdown of the output format
-        sections = stdout.split("\0\0")
-        subsections = [s.split("\0") for s in sections]
-        tree_hash = GitTreeHash(subsections[0][0])
-
-        if ret == 0 or ignore_conflicts:
+        if conflicts is None or ignore_conflicts:
             new_commit_info.tree = tree_hash
             return await self.commit_tree(new_commit_info)
-        elif ret == 1:
-            # conflicted_files would be subsections[0][1:] but we don't currently use this info
-            # (it corresponds to higher order files in cache).
-            informational = subsections[1]
-            # Information section is formatted as a list of conflicts:
-            # <num paths> <paths> <type> <message>
-            # We parse num paths first and loop through to extract the other fields.
-            e = GitConflictException(tree_hash)
-            i = 0
-            while i < len(informational) - 1:
-                num_paths = int(informational[i])
-                e.conflicts.append(
-                    GitConflict(
-                        informational[i + 1 + num_paths],
-                        informational[i + 2 + num_paths].strip(),
-                        informational[i + 1 : i + 1 + num_paths],
-                    )
-                )
-                i += num_paths + 3
-            raise e
-        else:
-            raise RuntimeError(f"Unexpected / unknown error in git {args} {ret}")
+
+        e = GitConflictException(tree_hash)
+        e.conflicts = conflicts
+        raise e
 
     async def dump_conflict(self, e: GitConflictException) -> None:
         """
@@ -728,7 +737,10 @@ class Git:
         """
         commit_info = copy.deepcopy(commit_to_amend)
         return await self.merge_tree_commit(
-            new_commit.commit_id, commit_info.commit_id, commit_info, new_commit.parents[0]
+            new_commit.commit_id,
+            commit_info.commit_id,
+            commit_info,
+            new_commit.parents[0],
         )
 
     async def synthetic_cherry_pick_from_commit(

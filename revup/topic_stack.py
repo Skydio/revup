@@ -148,9 +148,6 @@ class Review:
     # List of commits the remote has for this review
     remote_commits: List[git.CommitHeader] = field(default_factory=list)
 
-    # Corresponding output of git patch-id for each remote commit
-    remote_patch_ids: List[str] = field(default_factory=list)
-
     # Existing PR details for this review. None if no PR currently exists
     pr_info: Optional[PrInfo] = None
 
@@ -193,9 +190,6 @@ class Topic:
 
     # Original commits included in this topic
     original_commits: List[git.CommitHeader] = field(default_factory=list)
-
-    # Corresponding output of git patch-id for each commit
-    patch_ids: List[str] = field(default_factory=list)
 
     # Tags for this topic (union of all tags for commits in the topic)
     tags: Dict[str, Set[str]] = field(default_factory=lambda: defaultdict(set))
@@ -711,7 +705,7 @@ class TopicStack:
 
     async def mark_rebases(self, skip_rebase: bool) -> None:
         """
-        Scan all topics and compare patch-ids to remote patch-ids. Appropriately mark any
+        Scan all topics and compare local commits to remote commits. Appropriately mark any
         changes that are already merged, or where push can be skipped due to being rebases or
         being identical.
         """
@@ -781,18 +775,12 @@ class TopicStack:
                     self.use_reordering_workaround = True
 
             if review.pr_info is None:
-                # This is a new pr, no need to check patch ids
+                # This is a new pr, no need to check for rebase
                 review.is_pure_rebase = False
             else:
                 assert (
                     review.pr_info.baseRefOid is not None and review.pr_info.headRefOid is not None
                 )
-                if not topic.patch_ids:
-                    # Lazily load patch ids for the topic.
-                    topic.patch_ids = await asyncio.gather(
-                        *(self.git_ctx.get_patch_id(c.commit_id) for c in topic.original_commits)
-                    )
-
                 review.remote_commits = git.parse_rev_list(
                     await self.git_ctx.rev_list(
                         review.pr_info.headRefOid,
@@ -802,14 +790,13 @@ class TopicStack:
                     )
                 )
 
-                review.remote_patch_ids = await asyncio.gather(
-                    *(self.git_ctx.get_patch_id(c.commit_id) for c in review.remote_commits)
-                )
-
-                # This review is a rebase iff all commit diffs match
+                # Check rebase by applying each local commit onto the remote parent
+                # and comparing the resulting tree to the remote tree.
                 is_rebase = len(review.remote_commits) == len(topic.original_commits) and all(
-                    local_id == remote_id
-                    for local_id, remote_id in zip(topic.patch_ids, review.remote_patch_ids)
+                    await asyncio.gather(*(
+                        self.git_ctx.commits_are_equivalent(local, remote)
+                        for local, remote in zip(topic.original_commits, review.remote_commits)
+                    ))
                 )
                 # This review is a "complete rebase" iff all commit diffs and metadata match
                 review.is_pure_rebase = is_rebase and all(
@@ -957,8 +944,8 @@ class TopicStack:
                     next_parent = commit.commit_id
                 else:
                     # TODO: Potential optimization here: if remote_base_oid and base_ref are
-                    # the same, we can use trees to pick the first N commits where patch-id
-                    # is equal to remote patch-id
+                    # the same, we can use trees to pick the first N commits where the
+                    # local commit is equivalent to the remote commit
                     # TODO: We can parallelize independent chains of commit creation
                     try:
                         next_parent = await self.git_ctx.synthetic_cherry_pick_from_commit(
@@ -990,18 +977,11 @@ class TopicStack:
                 # 1. The relative PR was closed without merging after being uploaded. We don't look
                 # at closed PRs, so we don't know whether that branch has changed. However actually
                 # building both branches could reveal that the resulting commit is the same.
-                # 2. A commit might not match the remote based on patch id, but applying the patch
-                # would result in the same commit as the remote. This could happen if a part of the
-                # patch is dependent on a local commit, but is a no-op when applied to the base.
                 review.push_status = PushStatus.NOCHANGE
                 if review.status == PrStatus.NEW:
                     # A PR marked as new but with a pr_info must have previously been merged, but
                     # marked as new when checking rebases. Return it to merged.
                     review.status = PrStatus.MERGED
-                # TODO: If 2 above were true *and* a rebase occurred this wouldn't catch it and
-                # an erroneous push / pr creation would happen. We'd have to compute patch ids again
-                # to catch this which is a bit inefficient for all reviews. Lets see how common this
-                # is / try to think of alternative solutions.
 
     async def fetch_git_refs(self) -> None:
         """
