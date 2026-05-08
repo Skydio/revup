@@ -1022,6 +1022,50 @@ class TopicStack:
             ]
             await self.git_ctx.git(*fetch_args)
 
+    async def retarget_orphaned_prs(self) -> None:
+        """
+        Detect PRs whose previous target branch is no longer being pushed in this run.
+        Retarget them to the base branch as a safe intermediate before pushing.
+        This works around an issue where orphaning a change and rebasing will temporarily
+        cause github to see the entire upstream history in the PR diff, and mistakenly thrashes
+        a bunch of stuff like CODEOWNERS.
+        """
+        if not self.github_ep or not self.repo_info:
+            return
+
+        # Collect the set of branches we're pushing this run
+        pushing_branches: Set[str] = set()
+        for _, _, _, review in self.all_reviews_iter():
+            if review.push_status == PushStatus.PUSHED and review.status != PrStatus.MERGED:
+                pushing_branches.add(review.remote_head)
+
+        orphaned_updates: List[PrUpdate] = []
+        for _, _, base_branch, review in self.all_reviews_iter():
+            if not review.pr_info or review.status == PrStatus.MERGED:
+                continue
+            old_target = review.pr_info.baseRef
+            new_target = review.remote_base
+            if (
+                old_target != new_target
+                and old_target not in pushing_branches
+                and old_target != self.git_ctx.remove_branch_prefix(base_branch)
+            ):
+                base = self.git_ctx.remove_branch_prefix(base_branch)
+                logging.debug(
+                    f"Orphaned PR {review.remote_head}: old target {old_target} not being"
+                    f" pushed, retargeting to {base} before push"
+                )
+                update = PrUpdate()
+                update.id = review.pr_info.id
+                update.baseRef = base
+                orphaned_updates.append(update)
+                # Update cached state so update_prs() sees the new base and
+                # retargets to the final desired branch if different.
+                review.pr_info.baseRef = base
+
+        if orphaned_updates:
+            await github_utils.update_pull_requests(self.github_ep, orphaned_updates)
+
     async def push_git_refs(self, uploader: str, create_local_branches: bool) -> None:
         """
         Push all refs to their branch on the remote.
