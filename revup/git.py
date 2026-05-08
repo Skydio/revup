@@ -45,16 +45,6 @@ RE_COMMIT_HASH = re.compile(r"^[0-9a-f]{8,}")
 
 HEAD_COMMIT = GitCommitHash("HEAD")
 
-GIT_DIFF_ARGS = [
-    "--no-pager",
-    "diff",
-    "--full-index",
-    "--no-color",
-    "--no-textconv",
-    "--no-ext-diff",
-    "-U1",
-]
-
 GIT_ENV_NOCONFIG = {
     "HOME": "/dev/null",
     "GIT_CONFIG_NOSYSTEM": "1",
@@ -167,7 +157,14 @@ async def make_git(
             ret = os.environ.get("GIT_EDITOR", os.environ.get("EDITOR", "nano"))
         return ret
 
-    repo_root, git_dir, actual_version, email, editor, main_exists = await asyncio.gather(
+    (
+        repo_root,
+        git_dir,
+        actual_version,
+        email,
+        editor,
+        main_exists,
+    ) = await asyncio.gather(
         git_ctx.git_stdout("rev-parse", "--show-toplevel"),
         git_ctx.git_stdout("rev-parse", "--path-format=absolute", "--git-dir"),
         git_ctx.git_stdout("--version"),
@@ -571,40 +568,45 @@ class Git:
             "GIT_COMMITTER_DATE": commit_info.committer_date,
         }
         git_env = {k: v for k, v in git_env.items() if v != ""}
-        commit_tree_args = ["commit-tree", commit_info.tree, "-m", commit_info.commit_msg]
+        commit_tree_args = [
+            "commit-tree",
+            commit_info.tree,
+            "-m",
+            commit_info.commit_msg,
+        ]
         for p in commit_info.parents:
             commit_tree_args.extend(["-p", p])
         ret = await self.git_stdout(*commit_tree_args, env=git_env)
         return GitCommitHash(ret)
 
-    async def get_patch_id(
+    async def commits_are_equivalent(
         self,
-        commit: GitCommitHash,
-    ) -> str:
+        local_commit: GitCommitHash,
+        remote_commit: CommitHeader,
+    ) -> bool:
         """
-        Return a patch-id that uniquely identifies this commit's diff (but not its other metadata).
+        Check if local_commit produces the same diff as remote_commit by applying
+        local_commit onto remote_commit's parent via merge-tree and comparing trees.
         """
-        patch_source = (
-            [
-                self.git_path,
-            ]
-            + GIT_DIFF_ARGS
-            + [
-                commit + "~",
-                commit,
-            ]
-        )
-        ret = (
-            await self.sh.piped_sh(
-                patch_source,
-                [self.git_path, "patch-id", "--verbatim"],
-                env1=GIT_ENV_NOCONFIG,
-                env2=GIT_ENV_NOCONFIG,
-            )
-        )[1].split()
-        # If the diff is empty, patch id will return nothing. We just use that as the patch-id since
-        # it fulfills the requirement of matching other empty diffs.
-        return ret[0] if ret else ""
+        remote_parent = remote_commit.parents[0] if remote_commit.parents else ""
+        if not remote_parent:
+            return False
+
+        args = [
+            "merge-tree",
+            "--write-tree",
+            "-z",
+            "--merge-base",
+            local_commit + "~",
+            local_commit,
+            remote_parent,
+        ]
+        ret, stdout = await self.git(*args, no_config=True, raiseonerror=False)
+        if ret != 0:
+            return False
+
+        result_tree = GitTreeHash(stdout.split("\0\0")[0].split("\0")[0])
+        return result_tree == remote_commit.tree
 
     async def get_diff_summary(
         self,
@@ -728,7 +730,10 @@ class Git:
         """
         commit_info = copy.deepcopy(commit_to_amend)
         return await self.merge_tree_commit(
-            new_commit.commit_id, commit_info.commit_id, commit_info, new_commit.parents[0]
+            new_commit.commit_id,
+            commit_info.commit_id,
+            commit_info,
+            new_commit.parents[0],
         )
 
     async def synthetic_cherry_pick_from_commit(
