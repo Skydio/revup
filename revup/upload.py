@@ -95,6 +95,8 @@ async def main(
         if args.patchsets:
             # Patchsets require completed commit ids
             await topics.populate_patchsets()
+        if not args.push_only:
+            await topics.retarget_orphaned_prs()
         # Must push refs after creating them. Includes the virtual diff branch for patchsets.
         await topics.push_git_refs(git_ctx.author, args.create_local_branches)
 
