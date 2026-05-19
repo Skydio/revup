@@ -1178,3 +1178,45 @@ class TestRebaseDetection:
 
             assert not review.is_pure_rebase
             assert review.push_status == PushStatus.PUSHED
+
+    @async_test
+    async def test_noop_on_base_detected_as_rebase(self):
+        """A commit whose patch is a no-op when applied to the base should be detected as rebase.
+
+        This happens when a commit's diff depends on a preceding local commit but produces
+        the same tree as the base when cherry-picked independently. Patch-id would not match
+        the remote, but merge-tree correctly identifies the result as equivalent.
+        """
+        async with GitTestEnvironment() as env:
+            # Root has a.txt so cherry-pick onto base won't conflict
+            await env.commit("root", {"root.txt": "r", "a.txt": "original"})
+            await env.git_ctx.git("branch", "origin/main", "HEAD")
+
+            # Local commit A modifies a.txt
+            await env.commit("setup\n\nTopic: setup", {"a.txt": "modified"})
+            # Local commit B reverts a.txt back — a real diff locally, but a no-op on base
+            await env.commit("revert\n\nTopic: alpha", {"a.txt": "original"})
+
+            # First upload: alpha's cherry-pick onto base (which has a.txt="original") produces
+            # a commit whose tree matches the base tree.
+            first = await run_upload_pipeline(env)
+            first_review = first.topics["alpha"].reviews["origin/main"]
+            remote_head = first_review.new_commits[-1]
+            remote_base = first_review.base_ref
+
+            # Second run with the same commits — should detect as rebase
+            topics = await run_upload_pipeline(env)
+            review = topics.topics["alpha"].reviews["origin/main"]
+            review.pr_info = PrInfo(
+                baseRef="main",
+                headRef=review.remote_head,
+                baseRefOid=remote_base,
+                headRefOid=remote_head,
+                body="",
+                title="",
+                state="OPEN",
+            )
+
+            await topics.mark_rebases(skip_rebase=True)
+
+            assert review.is_pure_rebase
