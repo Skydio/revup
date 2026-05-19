@@ -63,7 +63,7 @@ async def main(
 
     with get_console().status("Creating commits…"):
         # Need to know rebase information before creating commits
-        await topics.create_commits(args.trim_tags)
+        await topics.create_commits(args.trim_tags, args.skip_empty_first_commit)
 
     if args.dry_run:
         topics.print(not args.verbose)

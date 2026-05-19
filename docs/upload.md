@@ -9,7 +9,8 @@ revup upload - Modify or create code reviews.
 `[--rebase] [--relative-chain] [--skip-confirm] [--dry-run] [--push-only]`
 `[--status] [--no-update-pr-body] [--review-graph]`
 `[--trim-tags] [--create-local-branches] [--patchsets] [--auto-add-users=<o>]`
-`[--force-reviewers] [--pr-body-source=<src>] [--labels=<labels>] [<topics>]`
+`[--force-reviewers] [--pr-body-source=<src>] [--skip-empty-first-commit]`
+`[--labels=<labels>] [<topics>]`
 
 # DESCRIPTION
 
@@ -227,6 +228,11 @@ repo root, or `docs/`) and takes the title from the first commit.
 **--auto-add-users**
 : If "no", do nothing extra. If "r2a", add users from the Reviewers tag as assignees.
 If "a2r", add users from the Assignees tag as reviewers. If "both", do both of the previous.
+
+**--skip-empty-first-commit**
+: Exclude the first commit of a topic when creating branches if it is empty. This allows
+using an empty commit purely for PR title and body text without that commit appearing in
+the merged history.
 
 **--head**
 : The name or commit of the branch to be uploaded. If not specified, defaults to HEAD.
