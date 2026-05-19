@@ -5,7 +5,7 @@ import os
 import re
 import shutil
 import tempfile
-from typing import Any, Dict, List, NamedTuple, Optional, Pattern, Tuple
+from typing import Any, Dict, List, Optional, Pattern, Tuple
 
 from async_lru import alru_cache as lru_cache
 
@@ -51,12 +51,6 @@ GIT_ENV_NOCONFIG = {
 }
 
 COMMON_MAIN_BRANCHES = ["main", "master"]  # Below logic assumes 2 values here
-
-
-GitHubRepoInfo = NamedTuple(
-    "GitHubRepoInfo",
-    [("name", str), ("owner", str)],
-)
 
 
 def parse_commit_header(raw_header: str) -> CommitHeader:
@@ -304,34 +298,14 @@ class Git:
     async def git_stdout(self, *args: str, **kwargs: Any) -> str:
         return (await self.git(*args, **kwargs))[1]
 
-    async def get_github_repo_info(self, github_url: str, remote_name: str) -> GitHubRepoInfo:
+    async def get_remote_url(self, remote_name: str) -> str:
         """
-        Return github repo's name and owner.
+        Return the URL configured for the given remote, or empty string if not found.
         """
-        owner = ""
-        name = ""
         ret = await self.git("config", "--get", f"remote.{remote_name}.url", raiseonerror=False)
         if ret[0] != 0:
-            return GitHubRepoInfo(owner=owner, name=name)
-        remote_url = ret[1]
-        while True:
-            match = rf"^[^@]+@{github_url}:([^/]+)/(.+)(?<!\.git)(?:\.git)?$"
-            m = re.match(match, remote_url)
-            if m:
-                owner = m.group(1)
-                name = m.group(2)
-                break
-            search = rf"{github_url}/([^/]+)/(.+)(?<!\.git)(?:\.git)?$"
-            m = re.search(search, remote_url)
-            if m:
-                owner = m.group(1)
-                name = m.group(2)
-                break
-
-            break
-
-        info = GitHubRepoInfo(owner=owner, name=name)
-        return info
+            return ""
+        return ret[1]
 
     async def rev_list(
         self,
@@ -799,7 +773,7 @@ class Git:
         new_commit_info = CommitHeader(GitTreeHash(""), [parent] if parent else [])
         new_commit_info.commit_msg = (
             f"revup virtual diff target\n\n{old_base}\n{old_head}\n{new_base}\n{new_head}\n\n"
-            "revup uses this branch internally to generate github viewable diffs. The commits and "
+            "revup uses this branch internally to generate browser viewable diffs. The commits and "
             "diffs between commits are not meaningful or useful."
         )
 

@@ -76,7 +76,7 @@ git clone https://github.com/<your-name>/revup.git && cd revup
 On first run, you will need to configure github credentials. Create a [GitHub Personal Access Token](https://github.com/settings/tokens/new?scopes=repo)
 with "repo" scope. Revup needs this in order to create and modify pull requests. Then run
 ```sh
-revup config github_oauth
+revup config forge_oauth
 ```
 and copy and paste the oauth into the prompt.
 

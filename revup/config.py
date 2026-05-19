@@ -71,9 +71,10 @@ class RevupArgParser(argparse.ArgumentParser):
                 # Ignore nonconfigurable actions (help, auto-generated negation)
                 continue
 
-            if len(action.option_strings) > 0 and action.option_strings[0].startswith("--"):
-                option = action.option_strings[0][2:].replace("-", "_")
-                ret[option] = action
+            for opt in action.option_strings:
+                if opt.startswith("--"):
+                    option = opt[2:].replace("-", "_")
+                    ret.setdefault(option, action)
         return ret
 
     def set_option_default(self, option: str, action: argparse.Action, value: str) -> None:
@@ -209,7 +210,7 @@ def config_main(conf: Config, args: argparse.Namespace, all_parsers: List[RevupA
             )
     elif args.value:
         value = args.value
-        if command == "revup" and key == "github_oauth":
+        if command == "revup" and key in ("forge_oauth", "github_oauth"):
             logging.warning(
                 "Prefer to omit the value on command line when entering sensitive info. "
                 "You may want to clear your shell history."
@@ -226,15 +227,7 @@ def config_main(conf: Config, args: argparse.Namespace, all_parsers: List[RevupA
         # (this may throw if the value is not allowed)
         parser.set_option_default(key, actions[key], value)
 
-        if command == "revup" and key == "github_username":
-            # From https://www.npmjs.com/package/github-username-regex :
-            # Github username may only contain alphanumeric characters or hyphens.
-            # Github username cannot have multiple consecutive hyphens.
-            # Github username cannot begin or end with a hyphen.
-            # Maximum is 39 characters.
-            if not re.match(r"^[a-z\d](?:[a-z\d]|-(?=[a-z\d])){0,38}$", value, re.I):
-                raise ValueError(f"{value} is not a valid GitHub username")
-        elif command == "revup" and key == "github_oauth":
+        if command == "revup" and key in ("forge_oauth", "github_oauth"):
             if not re.match(r"^[a-z\d_]+$", value, re.I):
                 raise ValueError("Input string is not a valid oauth")
 

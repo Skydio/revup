@@ -69,7 +69,7 @@ class RevupShellException(Exception):
     pass
 
 
-class RevupGithubException(Exception):
+class RevupForgeException(Exception):
     def __init__(self, error_json: Dict):
         super().__init__()
         self.error_json = error_json

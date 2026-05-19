@@ -14,8 +14,8 @@ from typing import Dict, Iterator, List, Optional, Set, Tuple
 from rich import get_console
 from rich.markup import escape
 
-from revup import git, github, github_utils
-from revup.github_utils import PrComment, PrInfo, PrUpdate
+from revup import git
+from revup.forge import MAX_COMMENTS_TO_QUERY, Forge, PrComment, PrInfo, PrUpdate
 from revup.types import (
     GitCommitHash,
     GitConflictException,
@@ -25,7 +25,7 @@ from revup.types import (
 )
 
 # Since topic name is incorporated into the branch name, we must ensure that it matches
-# the character set that github supports. It's possible to have other characters if they're
+# the character set that forges support. It's possible to have other characters if they're
 # properly escaped but we don't want to deal with that for now.
 # https://docs.github.com/en/get-started/using-git/dealing-with-special-characters-in-branch-and-tag-names
 RE_BRANCH_ALLOWED = re.compile(r"^[\w\d_\.\/-]+$")
@@ -112,11 +112,11 @@ class PrBodySource(Enum):
         return self.value
 
 
-# The current state of each review within github.
+# The current state of each review on the forge.
 class PrStatus(Enum):
     NEW = "new"  # needs to be created, or was just created
-    UPDATED = "updated"  # github data needs to be modified (title, reviewers, labels, etc)
-    NOCHANGE = "no change"  # no github mutations are necessary
+    UPDATED = "updated"  # forge data needs to be modified (title, reviewers, labels, etc)
+    NOCHANGE = "no change"  # no forge mutations are necessary
     MERGED = "already merged"  # change has already merged (and no mutations are possible)
 
 
@@ -130,7 +130,7 @@ class PushStatus(Enum):
 @dataclass
 class Review:
     """
-    Represents a single github pull request. Uniquely keyed by topic name and base branch.
+    Represents a single pull request. Uniquely keyed by topic name and base branch.
     """
 
     # Reference to the enclosing topic object
@@ -234,10 +234,8 @@ class TopicStack:
     # Branch / review that current reviews are relative to
     relative_branch: str
 
-    # Github access info
-    github_ep: Optional[github.GitHubEndpoint] = None
-    repo_info: Optional[github_utils.GitHubRepoInfo] = None
-    fork_info: Optional[github_utils.GitHubRepoInfo] = None
+    # Forge interface for PR operations
+    forge: Optional[Forge] = None
 
     # Commit at the head of the branch to be uploaded
     head: str = "HEAD"
@@ -248,19 +246,19 @@ class TopicStack:
     # Topic names to topic info
     topics: Dict[str, Topic] = field(default_factory=dict)
 
-    # Github node id of the repo
+    # Forge node id of the repo
     repo_id: Optional[str] = None
 
-    # Github node ids of users (reviewer/assignee)
+    # Forge node ids of users (reviewer/assignee)
     names_to_ids: Optional[Dict[str, str]] = None
 
-    # Github full login names of users
+    # Full login names of users
     names_to_logins: Optional[Dict[str, str]] = None
 
-    # Github node ids of labels
+    # Forge node ids of labels
     labels_to_ids: Optional[Dict[str, str]] = None
 
-    # Github node ids of teams, keyed by "org/slug"
+    # Forge node ids of teams, keyed by "org/slug"
     teams_to_ids: Optional[Dict[str, str]] = None
 
     # Team member logins keyed by "org/slug". None means the team is too large to
@@ -276,7 +274,7 @@ class TopicStack:
     # Whether populate() was successfully called
     populated: bool = False
 
-    # Whether to work around github issues with reordering by pushing a dummy commit
+    # Whether to work around forge issues with reordering by pushing a dummy commit
     use_reordering_workaround = False
 
     def all_reviews_iter(self) -> Iterator[Tuple[str, Topic, str, Review]]:
@@ -344,8 +342,7 @@ class TopicStack:
         if (
             review.push_status != PushStatus.PUSHED
             or review.status == PrStatus.MERGED
-            or not self.repo_info
-            or not self.fork_info
+            or not self.forge
             or review.pr_info is None
             or review.pr_info.headRefOid is None
             or review.pr_info.baseRefOid is None
@@ -380,8 +377,8 @@ class TopicStack:
                 if self.last_virtual_diff_target is None:
                     self.last_virtual_diff_target = GitCommitHash(self.base_branch)
                 self.last_virtual_diff_target = await self.git_ctx.make_virtual_diff_target(
-                    review.pr_info.baseRefOid,
-                    review.pr_info.headRefOid,
+                    GitCommitHash(review.pr_info.baseRefOid),
+                    GitCommitHash(review.pr_info.headRefOid),
                     review.base_ref,
                     review.new_commits[-1],
                     self.last_virtual_diff_target,
@@ -389,9 +386,9 @@ class TopicStack:
                 diff_base = self.last_virtual_diff_target
             else:
                 # Non rebase push, diff against previous version of the branch
-                diff_base = review.pr_info.headRefOid
+                diff_base = GitCommitHash(review.pr_info.headRefOid)
             diff = (
-                f"[diff](/{self.fork_info.owner}/{self.repo_info.name}/compare/"
+                f"[diff](/{self.forge.repo_owner}/{self.forge.repo_name}/compare/"
                 f"{diff_base}..{review.new_commits[-1]})"
             )
             summary = await self.git_ctx.get_diff_summary(diff_base, review.new_commits[-1])
@@ -405,9 +402,9 @@ class TopicStack:
         d = datetime.now()
         ret += (
             f"\r\n| {number} | [{review.new_commits[-1][:8]}]"
-            f"(/{self.fork_info.owner}/{self.repo_info.name}/commit/{review.new_commits[-1]}) "
+            f"(/{self.forge.repo_owner}/{self.forge.repo_name}/commit/{review.new_commits[-1]}) "
             f"| [{review.base_ref[:8]}]"
-            f"(/{self.fork_info.owner}/{self.repo_info.name}/commit/{review.base_ref}) "
+            f"(/{self.forge.repo_owner}/{self.forge.repo_name}/commit/{review.base_ref}) "
             f"| {diff} | {d:%b} {d.day} {d.hour}:{d.minute:02} {d:%p} | {summary} |"
         )
         return PrComment(ret, orig.id if orig else None)
@@ -570,14 +567,14 @@ class TopicStack:
                     )
                     relative_topic = ""
 
-            if self.repo_info and self.fork_info and self.fork_info.owner != self.repo_info.owner:
+            if self.forge and self.forge.is_fork:
                 if len(topic.tags[TAG_RELATIVE_BRANCH]) > 1:
                     raise RevupUsageException(
-                        "Can't use 'Relative-Branch' across forks due to github limitations!"
+                        "Can't use 'Relative-Branch' across forks due to forge limitations!"
                     )
                 if relative_topic:
                     logging.warning(
-                        f"Skipping topic '{name}' since github does not allow relative reviews"
+                        f"Skipping topic '{name}' since the forge does not allow relative reviews"
                         f" across forks. It will be uploaded when '{relative_topic}' merges."
                     )
                     del self.topics[name]
@@ -612,13 +609,13 @@ class TopicStack:
             if auto_add_users in ("a2r", "both"):
                 topic.tags[TAG_REVIEWER].update(topic.tags[TAG_ASSIGNEE])
 
-            # Github does not support teams as assignees, so reject any team-style entries
+            # Teams are not supported as assignees, so reject any team-style entries
             # up front rather than silently ignoring them.
             team_assignees = {a for a in topic.tags[TAG_ASSIGNEE] if is_team(a)}
             if team_assignees:
                 raise RevupUsageException(
-                    f"Topic '{name}' has team(s) listed as assignees, but Github only allows"
-                    f" users as assignees: {sorted(team_assignees)}"
+                    f"Topic '{name}' has team(s) listed as assignees, but only users are allowed:"
+                    f"  {sorted(team_assignees)}"
                 )
 
             # Track the last actually used topic for the relative-chain feature
@@ -917,8 +914,8 @@ class TopicStack:
 
             if review.push_status == PushStatus.PUSHED:
                 # If this change must be pushed, then all changes it depends on cannot be
-                # skipped due to rebase (although can be due to nochange), otherwise github
-                # will show the wrong commit diff between the two reviews
+                # skipped due to rebase (although can be due to nochange), otherwise the
+                # forge will show the wrong commit diff between the two reviews
                 cur_topic = topic.relative_topic
                 while cur_topic is not None:
                     cur_review = cur_topic.reviews[base_branch]
@@ -1021,8 +1018,7 @@ class TopicStack:
         These would normally exist locally, but might not due to running a git gc, or user
         switching to a different machine.
         """
-        if not self.github_ep or not self.repo_info:
-            raise RuntimeError("Can't fetch without github info")
+        assert self.forge
 
         to_fetch = set()
         for _, _, _, review in self.all_reviews_iter():
@@ -1049,10 +1045,10 @@ class TopicStack:
         Detect PRs whose previous target branch is no longer being pushed in this run.
         Retarget them to the base branch as a safe intermediate before pushing.
         This works around an issue where orphaning a change and rebasing will temporarily
-        cause github to see the entire upstream history in the PR diff, and mistakenly thrashes
+        cause the forge to see the entire upstream history in the PR diff, and mistakenly thrashes
         a bunch of stuff like CODEOWNERS.
         """
-        if not self.github_ep or not self.repo_info:
+        if not self.forge:
             return
 
         # Collect the set of branches we're pushing this run
@@ -1086,14 +1082,13 @@ class TopicStack:
                 review.pr_info.baseRef = base
 
         if orphaned_updates:
-            await github_utils.update_pull_requests(self.github_ep, orphaned_updates)
+            await self.forge.update_pull_requests(orphaned_updates)
 
     async def push_git_refs(self, uploader: str, create_local_branches: bool) -> None:
         """
         Push all refs to their branch on the remote.
         """
-        if not self.github_ep or not self.repo_info:
-            raise RuntimeError("Can't push without github info")
+        assert self.forge
 
         push_targets = []
         for _, _, _, review in self.all_reviews_iter():
@@ -1102,11 +1097,11 @@ class TopicStack:
 
             commit_to_push = review.new_commits[-1]
             if self.use_reordering_workaround:
-                # When reordering a relative series of PRs, github isn't able to handle the push,
-                # which happens via git, atomically with the api update, which happens through
-                # http. As a result github always sees the push happen first with the old relative
-                # structure. When reordering, a PR that is being moved forward might briefly look
-                # like it contains no new commits, causing github to either mark it merged or
+                # When reordering a relative series of PRs, the forge isn't able to handle the
+                # push, which happens via git, atomically with the api update, which happens
+                # through http. As a result the forge always sees the push happen first with the
+                # old relative structure. When reordering, a PR that is being moved forward might
+                # briefly look like it contains no new commits, causing it to be marked merged or
                 # closed. To prevent this, we add an empty dummy commit onto the branch before
                 # pushing, do the update, then push once more to remove the dummy commit. This
                 # only happens when we detect that it is needed, so does not add much overhead.
@@ -1152,14 +1147,13 @@ class TopicStack:
                 ),
             )
 
-    async def query_github(self) -> None:
+    async def query(self) -> None:
         """
-        Query pr and reviewer/label info from github
+        Query pr and reviewer/label info from the forge
         """
         if not self.topics:
             return
-        if not self.github_ep or not self.repo_info:
-            raise RuntimeError("Can't query without github info")
+        assert self.forge
 
         pr_targets = []
         user_ids = set()
@@ -1199,9 +1193,7 @@ class TopicStack:
             self.labels_to_ids,
             self.teams_to_ids,
             self.teams_to_members,
-        ) = await github_utils.query_everything(
-            self.github_ep,
-            self.repo_info,
+        ) = await self.forge.query_everything(
             pr_targets,
             list(user_ids),
             list(labels),
@@ -1261,7 +1253,7 @@ class TopicStack:
         pr_body_source: PrBodySource = PrBodySource.FIRST_COMMIT,
     ) -> None:
         """
-        Populate information necessary to do PR creation / update in github.
+        Populate information necessary to do PR creation / update on the forge.
         """
         if not self.topics:
             return
@@ -1296,7 +1288,7 @@ class TopicStack:
                 if not review.pr_info or review.status == PrStatus.MERGED:
                     continue
 
-                for i in range(github_utils.MAX_COMMENTS_TO_QUERY):
+                for i in range(MAX_COMMENTS_TO_QUERY):
                     # Match comment indexes for various features (they will be populated later)
                     if i >= len(review.pr_info.comments):
                         if review.review_graph_index is None:
@@ -1330,7 +1322,7 @@ class TopicStack:
                     user_reviewer_tags, self.names_to_logins
                 ).difference(review.pr_info.reviewers)
 
-                # A team may have been "resolved" by Github's code review assignment (the team
+                # A team may have been "resolved" by code review auto-assignment (the team
                 # gets dropped from reviewRequests and individuals get added). Re-requesting
                 # the team would trigger auto-assignment again, so skip teams whose members
                 # are already among the existing reviewers.
@@ -1348,7 +1340,7 @@ class TopicStack:
                             f"Not re-requesting team '{team_ref}' on "
                             f"{review.pr_info.url or review.remote_head} because existing "
                             f"reviewer(s) {overlap} are members of it. Re-requesting would trigger"
-                            " Github code review auto-assignment again."
+                            " code review auto-assignment again."
                         )
                         continue
                     teams_to_request.add(team_ref)
@@ -1498,12 +1490,11 @@ class TopicStack:
 
     async def create_prs(self) -> None:
         """
-        Actually perform the github graphql PR creation
+        Actually perform the PR creation on the forge
         """
         if not self.topics:
             return
-        if not self.github_ep or not self.repo_info or not self.fork_info or not self.repo_id:
-            raise RuntimeError("Can't update without github info")
+        assert self.forge and self.repo_id
 
         prs_to_create = []
         for _, _, _, review in self.all_reviews_iter():
@@ -1513,22 +1504,15 @@ class TopicStack:
         if prs_to_create:
             # Create all prs in one request. These will most likely end up being modified
             # later since its not possible to add labels or reviewers at creation time.
-            await github_utils.create_pull_requests(
-                self.github_ep,
-                self.repo_id,
-                self.repo_info,
-                self.fork_info,
-                prs_to_create,
-            )
+            await self.forge.create_pull_requests(self.repo_id, prs_to_create)
 
     async def update_prs(self) -> None:
         """
-        Actually perform the github graphql PR updates
+        Actually perform the PR updates on the forge
         """
         if not self.topics:
             return
-        if not self.github_ep or not self.repo_info or not self.fork_info or not self.repo_id:
-            raise RuntimeError("Can't update without github info")
+        assert self.forge and self.repo_id
 
         prs_to_update = []
         for _, _, _, review in self.all_reviews_iter():
@@ -1551,7 +1535,7 @@ class TopicStack:
                     review.status = PrStatus.UPDATED
 
         if prs_to_update:
-            await github_utils.update_pull_requests(self.github_ep, prs_to_update)
+            await self.forge.update_pull_requests(prs_to_update)
 
     def num_reviews_changed(self) -> int:
         """
@@ -1636,5 +1620,6 @@ class TopicStack:
                     if review.push_status != PushStatus.NOCHANGE:
                         # Push status is redundant if there's no change.
                         status_str += f" ({review.push_status.value})"
-                    get_console().print("[green]Github URL:[/]")
+                    forge_name = self.forge.name if self.forge else "PR"
+                    get_console().print(f"[green]{forge_name} URL:[/]")
                     get_console().print(f"  [underline]{review.pr_info.url}[/] {status_str}")
