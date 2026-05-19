@@ -3,7 +3,7 @@ import argparse
 import pytest
 from git_env import GitTestEnvironment, async_test
 
-from revup.github_utils import PrInfo
+from revup.forge import PrInfo
 from revup.topic_stack import (
     PrBodySource,
     PrStatus,

@@ -10,7 +10,7 @@ revup - Efficient git workflow and code review toolkit
 
 Revup is a python command-line toolkit for speeding up your
 git workflow. It provides commit-based development support and
-full github integration.
+full forge integration (GitHub, with more backends planned).
 
 All revup options can be given with a shorter unambiguous prefix.
 
@@ -25,7 +25,7 @@ line, the value of the last one will be used.
 : Prints out extra details for debugging. This will include the
 full command-line of any subprocesses that are run along with
 their full output, as well as the full input and output of any
-graphql requests to github.
+graphql requests to the forge.
 
 **--help, -h**
 : Show this help page.
@@ -34,32 +34,29 @@ graphql requests to github.
 : Print the version of revup and exit.
 
 **--proxy**
-: Proxy to use when making connections to GitHub
+: Proxy to use when making connections to the forge.
 
-**--github-oauth**
-: The oauth token that provides login credentials to github. Revup
+**--forge-oauth**
+: The oauth token that provides login credentials to the forge. Revup
 requires full repository read/write permissions in order to create
-and modify reviews. This is represented by the "repo" section of
+and modify reviews. For GitHub, this is represented by the "repo" section of
 https://github.com/settings/tokens/new.
 
-**--github-username**
-: The user's github username for login.
-
-**--github-url**
-:  URL to use for github. Defaults to "github.com" and would only
-need changed if the user is using github enterprise.
+**--forge-url**
+: URL to use for the forge. Defaults to "github.com" and would only
+need changed if the user is using GitHub Enterprise or another host.
 
 **--remote-name**
-: The name of the remote that corresponds to github. Branches on this
+: The name of the remote that corresponds to the forge. Branches on this
 remote are also used for base branch detection. Defaults to "origin".
 
 **--fork-name**
-: If specified, the name of the remote that corresponds to a github fork
+: If specified, the name of the remote that corresponds to a fork
 that should be used to push branches to. The pull request will be created
 using the branch from this fork. If empty, remote-name is used for both
 pushing and creating the pull request.
 
-Github does not allow base branches of pull requests to be in a different
+GitHub does not allow base branches of pull requests to be in a different
 fork, so reviews with a Relative: label will be deferred until its base
 merges. Relative-Branch cannot be used across forks.
 
@@ -114,7 +111,7 @@ cache. Can also change the commit text.
 given branch relative to its base branch, then cherry-pick it.
 
 **revup upload**
-: Upload and push the current stack of code reviews to github.
+: Upload and push the current stack of code reviews.
 
 **revup restack**
 : Reorder the current stack so that commits in a topic are consecutive.

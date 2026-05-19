@@ -7,14 +7,13 @@ from typing import Any, Optional, Tuple, Union
 
 from aiohttp import ClientSession, ContentTypeError
 
-from revup import github
-from revup.types import RevupGithubException, RevupRequestException
+from revup.types import RevupForgeException, RevupRequestException
 
 TRANSIENT_STATUSES = frozenset({500, 502, 503, 504})
 RETRYABLE_GRAPHQL_ERRORS = frozenset({"RESOURCE_LIMITS_EXCEEDED"})
 
 
-class RealGitHubEndpoint(github.GitHubEndpoint):
+class GitHubEndpoint:
     """
     A class representing a GitHub endpoint we can send queries to.
     It supports both GraphQL and REST interfaces.
@@ -123,7 +122,7 @@ class RealGitHubEndpoint(github.GitHubEndpoint):
                 logging.debug("Response JSON:\n{}".format(pretty_json))
 
             if "errors" in r:
-                raise RevupGithubException(r["errors"])
+                raise RevupForgeException(r["errors"])
 
             return r
 
@@ -139,13 +138,10 @@ class RealGitHubEndpoint(github.GitHubEndpoint):
                 msg = "GitHub returned {}".format(e.status)
                 if not await self._should_retry(attempt, max_retries, base_delay, msg):
                     raise
-            except RevupGithubException as e:
+            except RevupForgeException as e:
                 retryable = set(e.types) & RETRYABLE_GRAPHQL_ERRORS
                 if not retryable:
                     raise
-                # TODO: For RESOURCE_LIMITS_EXCEEDED, use x-ratelimit-reset header
-                # instead of exponential backoff - either wait until reset time or
-                # fail immediately if the wait would be too long.
                 msg = "GitHub GraphQL error ({})".format(", ".join(retryable))
                 if not await self._should_retry(attempt, max_retries, base_delay, msg):
                     raise

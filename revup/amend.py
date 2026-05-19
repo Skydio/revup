@@ -160,8 +160,6 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
         git_ctx,
         args.base_branch,
         args.relative_branch,
-        None,
-        None,
     )
     if args.ref_or_topic:
         commit = await parse_ref_or_topic(args.ref_or_topic, args, git_ctx, topics)
