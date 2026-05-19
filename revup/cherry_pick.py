@@ -3,12 +3,7 @@ import logging
 from typing import Tuple
 
 from revup import config, git
-from revup.github_utils import (
-    RE_PR_URL,
-    github_connection,
-    parse_pull_request_url,
-    query_pr_by_number,
-)
+from revup.forge_utils import RE_PR_URL, forge_connection, parse_pull_request_url
 from revup.types import GitCommitHash, GitTreeHash, RevupUsageException
 
 
@@ -19,13 +14,9 @@ async def resolve_pr_url(
     Resolve a PR URL to (head_ref, base_ref) by querying the GitHub API.
     """
     pr_params = parse_pull_request_url(pr_url)
-    async with github_connection(args=args, git_ctx=git_ctx, conf=conf) as (
-        github_ep,
-        _repo_info,
-        _fork_info,
-    ):
-        head_ref, base_ref = await query_pr_by_number(
-            github_ep, pr_params.owner, pr_params.name, pr_params.number
+    async with forge_connection(args=args, git_ctx=git_ctx, conf=conf) as forge:
+        head_ref, base_ref = await forge.query_pr_by_number(
+            pr_params.owner, pr_params.name, pr_params.number
         )
     logging.info(f"Resolved PR #{pr_params.number} to branch '{head_ref}' based on '{base_ref}'")
     return head_ref, base_ref

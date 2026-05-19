@@ -4,16 +4,15 @@ from typing import Optional
 
 from rich import get_console
 
-from revup import git, github, github_utils, topic_stack
+from revup import git, topic_stack
+from revup.forge import Forge
 from revup.types import RevupShellException
 
 
 async def main(
     args: argparse.Namespace,
     git_ctx: git.Git,
-    github_ep: Optional[github.GitHubEndpoint] = None,
-    repo_info: Optional[github_utils.GitHubRepoInfo] = None,
-    fork_info: Optional[github_utils.GitHubRepoInfo] = None,
+    forge: Optional[Forge] = None,
 ) -> int:
     """
     Handles the "upload" command.
@@ -22,9 +21,7 @@ async def main(
         git_ctx,
         args.base_branch,
         args.relative_branch,
-        github_ep,
-        repo_info,
-        fork_info,
+        forge,
         args.head,
     )
     with get_console().status("Finding topics…"):
@@ -47,8 +44,9 @@ async def main(
         )
 
     if not args.dry_run and not args.push_only:
-        with get_console().status("Querying github…"):
-            await topics.query_github()
+        assert forge is not None
+        with get_console().status(f"Querying {forge.name}…"):
+            await topics.query()
             # Fetch uses the oid results from the query
             await topics.fetch_git_refs()
 
@@ -104,9 +102,10 @@ async def main(
         topics.print(not args.verbose)
         return 0
 
+    assert forge is not None
     try:
         # Must create PRs after refs are pushed, and must update PRs after creating them.
-        with get_console().status("Updating github PRs…"):
+        with get_console().status(f"Updating {forge.name} PRs…"):
             await topics.create_prs()
             if args.review_graph:
                 # Review graph requires populated PR urls from creation
