@@ -262,8 +262,6 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
         git_ctx,
         args.base_branch,
         args.relative_branch,
-        None,
-        None,
     )
 
     if args.last_touched:

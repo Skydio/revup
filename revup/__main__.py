@@ -6,7 +6,7 @@ import sys
 from revup.revup import build_parser, main
 from revup.types import (
     RevupConflictException,
-    RevupGithubException,
+    RevupForgeException,
     RevupRequestException,
     RevupShellException,
     RevupUsageException,
@@ -35,8 +35,8 @@ def _main() -> None:
     except RevupShellException as e:
         logging.error(str(e))
         sys.exit(4)
-    except RevupGithubException as e:
-        logging.error(f"Github Exception: {e.type}: {e.message}")
+    except RevupForgeException as e:
+        logging.error(f"Forge Exception: {e.type}: {e.message}")
         sys.exit(5)
     except RevupRequestException as e:
         logging.error(f"Request failed with response status {e.status}")

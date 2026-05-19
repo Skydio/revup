@@ -18,6 +18,7 @@ from revup.completion import (
     topic_completer,
 )
 from revup.config import RevupArgParser
+from revup.forge_utils import parse_forge_info
 from revup.topic_stack import PrBodySource
 from revup.types import RevupUsageException
 
@@ -50,9 +51,8 @@ def make_toplevel_parser() -> RevupArgParser:
         "--version", action="version", version=f"%(prog)s {revup.__version__}"
     )
     revup_parser.add_argument("--proxy")
-    revup_parser.add_argument("--github-oauth")
-    revup_parser.add_argument("--github-username")
-    revup_parser.add_argument("--github-url", default="github.com")
+    revup_parser.add_argument("--forge-oauth", "--github-oauth")
+    revup_parser.add_argument("--forge-url", "--github-url", default="github.com")
     revup_parser.add_argument("--remote-name", default="origin")
     revup_parser.add_argument("--fork-name", default="")
     revup_parser.add_argument("--editor")
@@ -331,7 +331,7 @@ async def main(revup_parser: RevupArgParser, all_parsers: List[RevupArgParser]) 
     # So users don't accidentally leak their oauth when sharing logs
     logs.configure_logger(
         debug=args.verbose,
-        redactions={args.github_oauth: "<GITHUB_OAUTH>"} if args.github_oauth else {},
+        redactions={args.forge_oauth: "<GITHUB_OAUTH>"} if args.forge_oauth else {},
     )
 
     if args.cmd != "toolkit":
@@ -358,12 +358,11 @@ async def main(revup_parser: RevupArgParser, all_parsers: List[RevupArgParser]) 
         # "commit" is an alias of "amend --insert"
         args.insert = args.cmd == "commit" or args.insert
 
-        repo_info = await git_ctx.get_github_repo_info(
-            github_url=args.github_url, remote_name=args.remote_name
-        )
+        remote_url = await git_ctx.get_remote_url(args.remote_name)
+        repo_info = parse_forge_info(remote_url, args.forge_url)
 
         if not repo_info.owner or not repo_info.name:
-            # Don't try to get topics for repos that are not in use with github
+            # Don't try to get topics for repos that are not in use with a forge
             args.parse_topics = False
 
         return await amend.main(args=args, git_ctx=git_ctx)
@@ -373,22 +372,16 @@ async def main(revup_parser: RevupArgParser, all_parsers: List[RevupArgParser]) 
 
         return await restack.main(args=args, git_ctx=git_ctx)
 
-    from revup.github_utils import github_connection
+    from revup.forge_utils import forge_connection
 
-    async with github_connection(args=args, git_ctx=git_ctx, conf=conf) as (
-        github_ep,
-        repo_info,
-        fork_info,
-    ):
+    async with forge_connection(args=args, git_ctx=git_ctx, conf=conf) as forge:
         if args.cmd == "upload":
             from revup import upload
 
             return await upload.main(
                 args=args,
                 git_ctx=git_ctx,
-                github_ep=github_ep,
-                repo_info=repo_info,
-                fork_info=fork_info,
+                forge=forge,
             )
 
     return 1
