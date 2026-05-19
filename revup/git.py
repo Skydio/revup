@@ -263,6 +263,7 @@ class Git:
         self.fork_point.cache_clear()  # pylint: disable=no-member
         self.distance_to_fork_point.cache_clear()  # pylint: disable=no-member
         self.have_identical_trees.cache_clear()  # pylint: disable=no-member
+        self.to_tree.cache_clear()  # pylint: disable=no-member
         self.merge_tree.cache_clear()  # pylint: disable=no-member
 
     def get_scratch_dir(self) -> str:
@@ -376,6 +377,10 @@ class Git:
             raise RevupUsageException(f"{ref} is not a branch name!")
 
         return GitCommitHash(stdout)
+
+    @lru_cache(maxsize=None)
+    async def to_tree(self, ref: str) -> GitTreeHash:
+        return GitTreeHash(await self.git_stdout("rev-parse", ref + "^{tree}"))
 
     @lru_cache(maxsize=None)
     async def fork_point(self, ref: str, baseRef: str) -> GitCommitHash:

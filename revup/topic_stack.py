@@ -940,7 +940,7 @@ class TopicStack:
                     else:
                         break
 
-    async def create_commits(self, trim_tags: bool) -> None:
+    async def create_commits(self, trim_tags: bool, skip_empty_first_commit: bool = False) -> None:
         """
         Populate new_commits for all reviews by cherry-picking to the base ref if necessary.
         """
@@ -962,7 +962,13 @@ class TopicStack:
                 raise RuntimeError("Bug! review doesn't have a base ref")
 
             next_parent = review.base_ref
-            for commit in topic.original_commits:
+            for i, commit in enumerate(topic.original_commits):
+                if (
+                    skip_empty_first_commit
+                    and i == 0
+                    and commit.tree == await self.git_ctx.to_tree(commit.parents[0])
+                ):
+                    continue
                 if commit.parents[0] == next_parent and not trim_tags:
                     # If the intended parent is the same as the actual parent, skip the
                     # cherry-pick process (unless the commit msg needs to change).

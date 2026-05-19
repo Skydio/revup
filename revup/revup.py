@@ -197,6 +197,7 @@ def build_parser() -> Tuple[RevupArgParser, List[RevupArgParser]]:
         choices=PrBodySource,
         default=PrBodySource.FIRST_COMMIT,
     )
+    upload_parser.add_argument("--skip-empty-first-commit", action="store_true")
     upload_parser.add_argument("--head", default="HEAD")
 
     restack_parser.add_argument("--topicless-last", "-t", action="store_true")

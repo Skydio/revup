@@ -39,6 +39,7 @@ def make_upload_args(**kwargs):
         "relative_chain": False,
         "auto_topic": False,
         "head": "HEAD",
+        "skip_empty_first_commit": False,
         "verbose": False,
     }
     defaults.update(kwargs)
@@ -78,7 +79,7 @@ async def run_upload_pipeline(env, **kwargs):
         args.uploader if args.uploader else env.git_ctx.author,
         branch_format=args.branch_format,
     )
-    await topics.create_commits(args.trim_tags)
+    await topics.create_commits(args.trim_tags, args.skip_empty_first_commit)
     return topics
 
 
@@ -1250,3 +1251,48 @@ class TestRebaseDetection:
             await topics.mark_rebases(skip_rebase=True)
 
             assert review.is_pure_rebase
+
+
+class TestSkipEmptyFirstCommit:
+    @async_test
+    async def test_empty_first_commit_skipped(self):
+        """An empty first commit should be excluded from the cherry-picked branch."""
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            # Empty commit (no diff) used for PR title/body
+            await env.git_ctx.git("commit", "--allow-empty", "-m", "PR description\n\nTopic: feat")
+            # Real commit with changes
+            await env.commit("implement\n\nTopic: feat", {"a.txt": "content"})
+
+            topics = await run_upload_pipeline(env, skip_empty_first_commit=True)
+
+            review = topics.topics["feat"].reviews["origin/main"]
+            assert len(review.new_commits) == 1
+            content = await get_file_at_ref(env, review.new_commits[-1], "a.txt")
+            assert content == "content"
+
+    @async_test
+    async def test_empty_first_commit_kept_when_disabled(self):
+        """With the flag off, an empty first commit is included normally."""
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            await env.git_ctx.git("commit", "--allow-empty", "-m", "PR description\n\nTopic: feat")
+            await env.commit("implement\n\nTopic: feat", {"a.txt": "content"})
+
+            topics = await run_upload_pipeline(env, skip_empty_first_commit=False)
+
+            review = topics.topics["feat"].reviews["origin/main"]
+            assert len(review.new_commits) == 2
+
+    @async_test
+    async def test_nonempty_first_commit_not_skipped(self):
+        """A first commit with actual changes should never be skipped."""
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            await env.commit("first\n\nTopic: feat", {"a.txt": "v1"})
+            await env.commit("second\n\nTopic: feat", {"a.txt": "v2"})
+
+            topics = await run_upload_pipeline(env, skip_empty_first_commit=True)
+
+            review = topics.topics["feat"].reviews["origin/main"]
+            assert len(review.new_commits) == 2
