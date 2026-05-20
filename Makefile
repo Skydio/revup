@@ -77,6 +77,6 @@ man:
 	done
 
 test:
-	$(PYTHON) -m pytest tests/
+	$(PYTHON) -m pytest --cov=revup --cov-report=term-missing tests/
 
 .PHONY: all deps man install package format check_format check_types pylint lint clean
