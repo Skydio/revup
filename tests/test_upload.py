@@ -1,6 +1,9 @@
 import argparse
+import shutil
+import tempfile
 
 import pytest
+from fake_forge import FakeForge
 from git_env import GitTestEnvironment, async_test
 
 from revup.forge import PrInfo
@@ -1296,3 +1299,782 @@ class TestSkipEmptyFirstCommit:
 
             review = topics.topics["feat"].reviews["origin/main"]
             assert len(review.new_commits) == 2
+
+
+# --- Forge integration tests (using FakeForge) ---
+
+
+def make_forge_upload_args(**kwargs):
+    defaults = {
+        "topics": [],
+        "base_branch": None,
+        "relative_branch": None,
+        "rebase": False,
+        "skip_confirm": True,
+        "dry_run": False,
+        "push_only": False,
+        "status": False,
+        "update_pr_body": True,
+        "create_local_branches": False,
+        "review_graph": True,
+        "trim_tags": False,
+        "patchsets": False,
+        "self_authored_only": False,
+        "labels": None,
+        "auto_add_users": "no",
+        "user_aliases": "",
+        "uploader": "",
+        "branch_format": "user+branch",
+        "pre_upload": None,
+        "relative_chain": False,
+        "auto_topic": False,
+        "head": "HEAD",
+        "skip_empty_first_commit": False,
+        "verbose": False,
+        "force_reviewers": False,
+        "pr_body_source": PrBodySource.FIRST_COMMIT,
+    }
+    defaults.update(kwargs)
+    return argparse.Namespace(**defaults)
+
+
+async def full_upload_pipeline(env, forge, push=False, stop_after=None, **kwargs):
+    """
+    Run the full upload pipeline via upload.run() generator.
+    If stop_after is set to an UploadPhase, stops after that phase yields.
+    """
+    from revup.upload import UploadPhase, run
+
+    env.git_ctx.clear_cache()
+    args = make_forge_upload_args(**kwargs)
+    topics = None
+    async for phase, t in run(args, env.git_ctx, forge, skip_push=not push):
+        topics = t
+        if stop_after is not None and phase == stop_after:
+            break
+    assert topics is not None
+    return topics
+
+
+async def setup_repo_with_remote(env):
+    """Create root commit, bare remote, and origin/main tracking branch."""
+    await env.commit("root", {"root.txt": "r"})
+    bare_dir = tempfile.mkdtemp(prefix="revup_test_bare_")
+    await env.git_ctx.git("init", "--bare", bare_dir)
+    await env.git_ctx.git("remote", "add", "origin", bare_dir)
+    await env.git_ctx.git("push", "origin", "main")
+    await env.git_ctx.git("branch", "origin/main", "HEAD")
+    return bare_dir
+
+
+class TestForgeCreatePrs:
+    @async_test
+    async def test_new_topic_creates_pr(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.commit("feat title\n\nbody text\n\nTopic: alpha", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge)
+
+            assert len(forge.created_prs) == 1
+            pr = forge.created_prs[0]
+            assert pr.title == "feat title"
+            assert "body text" in pr.body
+            assert pr.baseRef == "main"
+
+    @async_test
+    async def test_multiple_topics_create_separate_prs(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.commit("alpha\n\nTopic: alpha", {"a.txt": "a"})
+            await env.commit("beta\n\nTopic: beta", {"b.txt": "b"})
+
+            await full_upload_pipeline(env, forge)
+
+            assert len(forge.created_prs) == 2
+            titles = {pr.title for pr in forge.created_prs}
+            assert titles == {"alpha", "beta"}
+
+    @async_test
+    async def test_relative_topic_targets_parent_branch(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.commit("parent\n\nTopic: parent", {"a.txt": "a"})
+            await env.commit("child\n\nTopic: child\nRelative: parent", {"b.txt": "b"})
+
+            await full_upload_pipeline(env, forge)
+
+            parent_pr = next(pr for pr in forge.created_prs if pr.title == "parent")
+            child_pr = next(pr for pr in forge.created_prs if pr.title == "child")
+            assert parent_pr.baseRef == "main"
+            assert child_pr.baseRef == parent_pr.headRef
+
+
+class TestForgeUpdatePrs:
+    @async_test
+    async def test_second_upload_updates_existing_pr(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.commit("feat\n\nTopic: alpha", {"a.txt": "v1"})
+
+            await full_upload_pipeline(env, forge)
+            assert len(forge.created_prs) == 1
+            forge.created_prs.clear()
+
+            await env.stage_file("a.txt", "v2")
+            await env.git_ctx.git("commit", "--amend", "-m", "feat updated\n\nTopic: alpha")
+
+            await full_upload_pipeline(env, forge)
+
+            assert len(forge.created_prs) == 0
+            assert any(u.title == "feat updated" for u in forge.updated_prs)
+
+    @async_test
+    async def test_update_pr_body_false_skips_body_update(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.commit("title\n\noriginal body\n\nTopic: alpha", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge)
+
+            await env.git_ctx.git("commit", "--amend", "-m", "title\n\nnew body\n\nTopic: alpha")
+            forge.updated_prs.clear()
+
+            await full_upload_pipeline(env, forge, update_pr_body=False)
+
+            body_updates = [u for u in forge.updated_prs if u.body is not None]
+            assert len(body_updates) == 0
+
+    @async_test
+    async def test_update_pr_body_tag_overrides_flag(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.commit("title\n\nbody\n\nTopic: alpha\nUpdate-Pr-Body: false", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge)
+
+            await env.git_ctx.git(
+                "commit",
+                "--amend",
+                "-m",
+                "title\n\nnew body\n\nTopic: alpha\nUpdate-Pr-Body: false",
+            )
+            forge.updated_prs.clear()
+
+            await full_upload_pipeline(env, forge, update_pr_body=True)
+
+            body_updates = [u for u in forge.updated_prs if u.body is not None]
+            assert len(body_updates) == 0
+
+
+class TestForgeReviewers:
+    @async_test
+    async def test_reviewers_resolved_to_ids(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge(users={"alice": ("id_alice", "alice-full")})
+            await env.commit("feat\n\nTopic: alpha\nReviewer: alice", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge)
+
+            assert len(forge.updated_prs) > 0
+            update = forge.updated_prs[0]
+            assert "id_alice" in update.reviewer_ids
+
+    @async_test
+    async def test_unknown_reviewer_silently_skipped(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge(users={"alice": ("id_alice", "alice-full")})
+            await env.commit("feat\n\nTopic: alpha\nReviewer: alice, ghost", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge)
+
+            update = forge.updated_prs[0]
+            assert "id_alice" in update.reviewer_ids
+            assert len(update.reviewer_ids) == 1
+
+    @async_test
+    async def test_removed_reviewer_not_re_added(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge(users={"bob": ("id_bob", "bob-full")})
+            await env.commit("feat\n\nTopic: alpha\nReviewer: bob", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge)
+
+            # Simulate bob being removed on the forge
+            pr = list(forge.prs.values())[0]
+            pr.reviewers = set()
+            pr.reviewer_ids = set()
+            pr.removed_reviewers = {"bob-full"}
+            pr.removed_reviewer_ids = {"id_bob"}
+            forge.updated_prs.clear()
+
+            await env.stage_file("a.txt", "a2")
+            await env.git_ctx.git("commit", "--amend", "-m", "feat\n\nTopic: alpha\nReviewer: bob")
+
+            await full_upload_pipeline(env, forge)
+
+            reviewer_ids = set()
+            for u in forge.updated_prs:
+                reviewer_ids |= u.reviewer_ids
+            assert "id_bob" not in reviewer_ids
+
+    @async_test
+    async def test_force_reviewers_re_adds_removed(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge(users={"bob": ("id_bob", "bob-full")})
+            await env.commit("feat\n\nTopic: alpha\nReviewer: bob", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge)
+
+            pr = list(forge.prs.values())[0]
+            pr.reviewers = set()
+            pr.reviewer_ids = set()
+            pr.removed_reviewers = {"bob-full"}
+            pr.removed_reviewer_ids = {"id_bob"}
+            forge.updated_prs.clear()
+
+            await env.stage_file("a.txt", "a2")
+            await env.git_ctx.git("commit", "--amend", "-m", "feat\n\nTopic: alpha\nReviewer: bob")
+
+            await full_upload_pipeline(env, forge, force_reviewers=True)
+
+            reviewer_ids = set()
+            for u in forge.updated_prs:
+                reviewer_ids |= u.reviewer_ids
+            assert "id_bob" in reviewer_ids
+
+    @async_test
+    async def test_team_reviewer_resolved(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge(teams={"myorg/backend": ("team_1", {"alice", "bob"})})
+            await env.commit("feat\n\nTopic: alpha\nReviewer: myorg/backend", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge)
+
+            update = forge.updated_prs[0]
+            assert "team_1" in update.reviewer_team_ids
+
+    @async_test
+    async def test_team_not_re_requested_if_member_reviewing(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge(teams={"myorg/backend": ("team_1", {"alice", "bob"})})
+            await env.commit("feat\n\nTopic: alpha\nReviewer: myorg/backend", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge)
+
+            # Simulate: team resolved, alice is now a reviewer
+            pr = list(forge.prs.values())[0]
+            pr.reviewers = {"alice"}
+            pr.reviewer_ids = {"id_alice"}
+            pr.reviewer_teams = set()
+            pr.reviewer_team_ids = set()
+            forge.updated_prs.clear()
+
+            await env.stage_file("a.txt", "a2")
+            await env.git_ctx.git(
+                "commit",
+                "--amend",
+                "-m",
+                "feat\n\nTopic: alpha\nReviewer: myorg/backend",
+            )
+
+            await full_upload_pipeline(env, forge)
+
+            team_ids = set()
+            for u in forge.updated_prs:
+                team_ids |= u.reviewer_team_ids
+            assert "team_1" not in team_ids
+
+
+class TestForgeLabels:
+    @async_test
+    async def test_labels_resolved_to_ids(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge(labels={"bug": "label_1", "main": "label_main"})
+            await env.commit("feat\n\nTopic: alpha\nLabel: bug", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge)
+
+            update = forge.updated_prs[0]
+            assert "label_1" in update.label_ids
+
+    @async_test
+    async def test_base_branch_label_auto_added(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge(labels={"main": "label_main"})
+            await env.commit("feat\n\nTopic: alpha", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge)
+
+            update = forge.updated_prs[0]
+            assert "label_main" in update.label_ids
+
+    @async_test
+    async def test_draft_label_creates_draft_pr(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.commit("feat\n\nTopic: alpha\nLabel: draft", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge)
+
+            pr = forge.created_prs[0]
+            assert pr.is_draft is True
+
+
+class TestForgeReviewGraph:
+    @async_test
+    async def test_review_graph_comment_created_for_chain(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.commit("parent\n\nTopic: parent", {"a.txt": "a"})
+            await env.commit("child\n\nTopic: child\nRelative: parent", {"b.txt": "b"})
+
+            await full_upload_pipeline(env, forge, review_graph=True)
+
+            comments = []
+            for u in forge.updated_prs:
+                comments.extend(u.comments)
+            graph_comments = [c for c in comments if "Reviews in this chain" in c.text]
+            assert len(graph_comments) >= 2
+
+    @async_test
+    async def test_no_review_graph_when_disabled(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.commit("parent\n\nTopic: parent", {"a.txt": "a"})
+            await env.commit("child\n\nTopic: child\nRelative: parent", {"b.txt": "b"})
+
+            await full_upload_pipeline(env, forge, review_graph=False)
+
+            comments = []
+            for u in forge.updated_prs:
+                comments.extend(u.comments)
+            graph_comments = [c for c in comments if "Reviews in this chain" in c.text]
+            assert len(graph_comments) == 0
+
+
+class TestForgePrBodySource:
+    @async_test
+    async def test_squashed_body_on_create(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.commit("title\n\nfirst body\n\nTopic: alpha", {"a.txt": "a"})
+            await env.commit("second\n\nsecond body\n\nTopic: alpha", {"b.txt": "b"})
+
+            await full_upload_pipeline(env, forge, pr_body_source=PrBodySource.SQUASHED)
+
+            pr = forge.created_prs[0]
+            assert "first body" in pr.body
+            assert "second body" in pr.body
+
+    @async_test
+    async def test_template_body_on_create(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.write_file(".github/PULL_REQUEST_TEMPLATE.md", "## Summary\n\n## Tests\n")
+            await env.commit("feat\n\nTopic: alpha", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge, pr_body_source=PrBodySource.TEMPLATE)
+
+            pr = forge.created_prs[0]
+            assert "## Summary" in pr.body
+
+
+class TestForgeMergedPr:
+    @async_test
+    async def test_merged_pr_with_same_content_stays_merged(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.commit("feat\n\nTopic: alpha", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge, review_graph=False)
+
+            pr = list(forge.prs.values())[0]
+            pr.state = "MERGED"
+            forge.created_prs.clear()
+
+            topics = await full_upload_pipeline(env, forge, review_graph=False)
+
+            assert len(forge.created_prs) == 0
+            review = topics.topics["alpha"].reviews["origin/main"]
+            assert review.status == PrStatus.MERGED
+
+    @async_test
+    async def test_merged_pr_with_new_content_creates_new(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.commit("feat\n\nTopic: alpha", {"a.txt": "v1"})
+
+            await full_upload_pipeline(env, forge, review_graph=False)
+
+            pr = list(forge.prs.values())[0]
+            pr.state = "MERGED"
+            forge.created_prs.clear()
+
+            await env.stage_file("a.txt", "v2")
+            await env.git_ctx.git("commit", "--amend", "-m", "feat\n\nTopic: alpha")
+
+            await full_upload_pipeline(env, forge, review_graph=False)
+
+            assert len(forge.created_prs) == 1
+
+
+class TestForgeNumReviewsChanged:
+    @async_test
+    async def test_no_change_means_zero(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.commit("feat\n\nTopic: alpha", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge, review_graph=False)
+            forge.created_prs.clear()
+            forge.updated_prs.clear()
+
+            topics = await full_upload_pipeline(env, forge, review_graph=False)
+            assert topics.num_reviews_changed() == 0
+
+    @async_test
+    async def test_new_topic_counted(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.commit("feat\n\nTopic: alpha", {"a.txt": "a"})
+
+            topics = await full_upload_pipeline(env, forge, review_graph=False)
+            assert topics.num_reviews_changed() == 1
+
+
+class TestForgeAssignees:
+    @async_test
+    async def test_assignees_resolved(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge(users={"bob": ("id_bob", "bob-full")})
+            await env.commit("feat\n\nTopic: alpha\nAssignee: bob", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge)
+
+            update = forge.updated_prs[0]
+            assert "id_bob" in update.assignee_ids
+
+    @async_test
+    async def test_auto_add_users_r2a(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge(users={"alice": ("id_alice", "alice-full")})
+            await env.commit("feat\n\nTopic: alpha\nReviewer: alice", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge, auto_add_users="r2a")
+
+            update = forge.updated_prs[0]
+            assert "id_alice" in update.assignee_ids
+            assert "id_alice" in update.reviewer_ids
+
+    @async_test
+    async def test_auto_add_users_a2r(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge(users={"bob": ("id_bob", "bob-full")})
+            await env.commit("feat\n\nTopic: alpha\nAssignee: bob", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge, auto_add_users="a2r")
+
+            update = forge.updated_prs[0]
+            assert "id_bob" in update.reviewer_ids
+            assert "id_bob" in update.assignee_ids
+
+
+class TestRetargetOrphanedPrs:
+    @async_test
+    async def test_orphaned_child_retargeted_to_base(self):
+        """
+        When a parent is removed from the chain, retarget_orphaned_prs must retarget
+        the child to the base branch before push, otherwise the forge sees stale history.
+        """
+        async with GitTestEnvironment() as env:
+            bare_dir = await setup_repo_with_remote(env)
+            forge = FakeForge()
+
+            await env.commit("parent\n\nTopic: parent", {"a.txt": "a"})
+            await env.commit("child\n\nTopic: child\nRelative: parent", {"b.txt": "b"})
+            await full_upload_pipeline(env, forge, push=True, review_graph=False)
+
+            child_pr = next(pr for pr in forge.created_prs if pr.title == "child")
+            parent_pr = next(pr for pr in forge.created_prs if pr.title == "parent")
+            assert child_pr.baseRef == parent_pr.headRef
+
+            # Remove parent from chain — child is now standalone
+            await env.git_ctx.git("reset", "--hard", "HEAD~2")
+            await env.commit("child standalone\n\nTopic: child", {"b.txt": "b"})
+            forge.updated_prs.clear()
+
+            await full_upload_pipeline(env, forge, push=True, review_graph=False)
+
+            retarget_updates = [
+                u for u in forge.updated_prs if u.baseRef == "main" and u.id == child_pr.id
+            ]
+            assert len(retarget_updates) >= 1
+
+            shutil.rmtree(bare_dir, ignore_errors=True)
+
+    @async_test
+    async def test_without_retarget_child_targets_stale_branch(self):
+        """
+        Without retarget_orphaned_prs, the child PR still targets the parent's branch
+        at push time — the forge would see stale upstream history in the diff.
+        """
+        from revup.upload import UploadPhase
+
+        async with GitTestEnvironment() as env:
+            bare_dir = await setup_repo_with_remote(env)
+            forge = FakeForge()
+
+            await env.commit("parent\n\nTopic: parent", {"a.txt": "a"})
+            await env.commit("child\n\nTopic: child\nRelative: parent", {"b.txt": "b"})
+            await full_upload_pipeline(env, forge, push=True, review_graph=False)
+
+            parent_pr = next(pr for pr in forge.created_prs if pr.title == "parent")
+            parent_branch = parent_pr.headRef
+
+            # Remove parent from chain
+            await env.git_ctx.git("reset", "--hard", "HEAD~2")
+            await env.commit("child standalone\n\nTopic: child", {"b.txt": "b"})
+
+            # Run pipeline stopping before push to observe stale state
+            topics = await full_upload_pipeline(
+                env,
+                forge,
+                push=True,
+                review_graph=False,
+                stop_after=UploadPhase.READY_TO_PUSH,
+            )
+
+            # At push time, child still targets stale parent branch
+            child_review = topics.topics["child"].reviews["origin/main"]
+            assert child_review.pr_info.baseRef == parent_branch
+
+            # Parent branch is not being pushed this run — forge would see stale diff
+            pushing = {
+                r.remote_head
+                for _, _, _, r in topics.all_reviews_iter()
+                if r.push_status == PushStatus.PUSHED and r.status != PrStatus.MERGED
+            }
+            assert parent_branch not in pushing
+
+            # retarget_orphaned_prs fixes this before push
+            await topics.retarget_orphaned_prs()
+            assert child_review.pr_info.baseRef == "main"
+
+            shutil.rmtree(bare_dir, ignore_errors=True)
+
+    @async_test
+    async def test_retarget_not_triggered_when_parent_still_pushed(self):
+        """
+        When the parent is still being pushed, no orphan retarget should happen.
+        """
+        async with GitTestEnvironment() as env:
+            bare_dir = await setup_repo_with_remote(env)
+            forge = FakeForge()
+
+            await env.commit("parent\n\nTopic: parent", {"a.txt": "a"})
+            await env.commit("child\n\nTopic: child\nRelative: parent", {"b.txt": "b"})
+            await full_upload_pipeline(env, forge, push=True, review_graph=False)
+
+            child_pr = next(pr for pr in forge.created_prs if pr.title == "child")
+            forge.updated_prs.clear()
+
+            # Update both — parent still in chain
+            await env.git_ctx.git("reset", "--hard", "HEAD~2")
+            await env.commit("parent v2\n\nTopic: parent", {"a.txt": "a2"})
+            await env.commit("child v2\n\nTopic: child\nRelative: parent", {"b.txt": "b2"})
+
+            await full_upload_pipeline(env, forge, push=True, review_graph=False)
+
+            retarget_to_main = [
+                u for u in forge.updated_prs if u.baseRef == "main" and u.id == child_pr.id
+            ]
+            assert len(retarget_to_main) == 0
+
+            shutil.rmtree(bare_dir, ignore_errors=True)
+
+
+class TestReorderingWorkaround:
+    @async_test
+    async def test_reordering_sets_workaround_flag(self):
+        """
+        When 2+ PRs have their base changed (reordering), the workaround flag must be set.
+        """
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+
+            await env.commit("A\n\nTopic: a", {"a.txt": "a"})
+            await env.commit("B\n\nTopic: b\nRelative: a", {"b.txt": "b"})
+            await env.commit("C\n\nTopic: c\nRelative: b", {"c.txt": "c"})
+            await full_upload_pipeline(env, forge, review_graph=False)
+
+            # Reorder to A → C → B
+            await env.git_ctx.git("reset", "--hard", "HEAD~3")
+            await env.commit("A\n\nTopic: a", {"a.txt": "a"})
+            await env.commit("C\n\nTopic: c\nRelative: a", {"c.txt": "c"})
+            await env.commit("B\n\nTopic: b\nRelative: c", {"b.txt": "b"})
+
+            topics = await full_upload_pipeline(env, forge, review_graph=False)
+            assert topics.use_reordering_workaround is True
+
+    @async_test
+    async def test_single_base_change_does_not_trigger_workaround(self):
+        """
+        Only 1 base change (removing middle of chain) should NOT trigger the workaround.
+        """
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+
+            await env.commit("A\n\nTopic: a", {"a.txt": "a"})
+            await env.commit("B\n\nTopic: b\nRelative: a", {"b.txt": "b"})
+            await env.commit("C\n\nTopic: c\nRelative: b", {"c.txt": "c"})
+            await full_upload_pipeline(env, forge, review_graph=False)
+
+            # Remove B, C now relative to A (only C's base changes)
+            await env.git_ctx.git("reset", "--hard", "HEAD~3")
+            await env.commit("A\n\nTopic: a", {"a.txt": "a"})
+            await env.commit("C\n\nTopic: c\nRelative: a", {"c.txt": "c"})
+
+            topics = await full_upload_pipeline(env, forge, review_graph=False)
+            assert topics.use_reordering_workaround is False
+
+    @async_test
+    async def test_reordering_workaround_prevents_empty_pr(self):
+        """
+        After the first push during reordering, every PR must still have commits
+        not reachable from its old base (the base the forge still knows about).
+        Without the workaround, the forge would see 0 commits and mark PRs merged.
+        """
+        async with GitTestEnvironment() as env:
+            bare_dir = await setup_repo_with_remote(env)
+            forge = FakeForge()
+
+            # Initial chain: A → B → C
+            await env.commit("A\n\nTopic: a", {"a.txt": "a"})
+            await env.commit("B\n\nTopic: b\nRelative: a", {"b.txt": "b"})
+            await env.commit("C\n\nTopic: c\nRelative: b", {"c.txt": "c"})
+            await full_upload_pipeline(env, forge, push=True, review_graph=False)
+
+            pr_b = next(pr for pr in forge.created_prs if pr.title == "B")
+            pr_c = next(pr for pr in forge.created_prs if pr.title == "C")
+            # Record old bases the forge knows about
+            old_bases = {pr_b.headRef: pr_b.baseRef, pr_c.headRef: pr_c.baseRef}
+
+            # Reorder to A → C → B
+            await env.git_ctx.git("reset", "--hard", "HEAD~3")
+            await env.commit("A\n\nTopic: a", {"a.txt": "a"})
+            await env.commit("C\n\nTopic: c\nRelative: a", {"c.txt": "c"})
+            await env.commit("B\n\nTopic: b\nRelative: c", {"b.txt": "b"})
+
+            # Run up through first push (workaround active), stop before API update
+            topics = await full_upload_pipeline(env, forge, review_graph=False)
+            assert topics.use_reordering_workaround is True
+            await topics.retarget_orphaned_prs()
+            await topics.push_git_refs(env.git_ctx.author, False)
+
+            # Verify invariant: for every PR whose base changed, the remote branch
+            # has commits unreachable from the OLD base (forge hasn't updated yet)
+            for _, _, _, review in topics.all_reviews_iter():
+                if review.push_status != PushStatus.PUSHED or review.status == PrStatus.MERGED:
+                    continue
+                if review.remote_head not in old_bases:
+                    continue
+                old_base_branch = old_bases[review.remote_head]
+                # Count commits on remote branch not reachable from old base
+                remote_ref = await env.git_ctx.git_stdout("ls-remote", "origin", review.remote_head)
+                remote_commit = remote_ref.split()[0]
+                old_base_ref = await env.git_ctx.git_stdout("ls-remote", "origin", old_base_branch)
+                old_base_commit = old_base_ref.split()[0]
+                count = await env.git_ctx.git_stdout(
+                    "rev-list", "--count", f"{old_base_commit}..{remote_commit}"
+                )
+                assert int(count) > 0, (
+                    f"PR {review.remote_head} has 0 commits relative to old base"
+                    f" {old_base_branch} — forge would mark it merged"
+                )
+
+            shutil.rmtree(bare_dir, ignore_errors=True)
+
+    @async_test
+    async def test_without_workaround_reordering_creates_empty_pr(self):
+        """
+        Without the reordering workaround, pushing reordered PRs causes at least one
+        PR to have 0 commits relative to its old base — the exact condition that makes
+        the forge mark it as merged/closed.
+        """
+        async with GitTestEnvironment() as env:
+            bare_dir = await setup_repo_with_remote(env)
+            forge = FakeForge()
+
+            # Initial chain: A → B → C
+            await env.commit("A\n\nTopic: a", {"a.txt": "a"})
+            await env.commit("B\n\nTopic: b\nRelative: a", {"b.txt": "b"})
+            await env.commit("C\n\nTopic: c\nRelative: b", {"c.txt": "c"})
+            await full_upload_pipeline(env, forge, push=True, review_graph=False)
+
+            pr_b = next(pr for pr in forge.created_prs if pr.title == "B")
+            pr_c = next(pr for pr in forge.created_prs if pr.title == "C")
+            old_bases = {pr_b.headRef: pr_b.baseRef, pr_c.headRef: pr_c.baseRef}
+
+            # Reorder to A → C → B
+            await env.git_ctx.git("reset", "--hard", "HEAD~3")
+            await env.commit("A\n\nTopic: a", {"a.txt": "a"})
+            await env.commit("C\n\nTopic: c\nRelative: a", {"c.txt": "c"})
+            await env.commit("B\n\nTopic: b\nRelative: c", {"b.txt": "b"})
+
+            # Run pipeline and push WITHOUT the workaround
+            topics = await full_upload_pipeline(env, forge, review_graph=False)
+            assert topics.use_reordering_workaround is True
+            topics.use_reordering_workaround = False  # disable it
+            await topics.push_git_refs(env.git_ctx.author, False)
+
+            # At least one PR now has 0 commits relative to its old base
+            found_empty = False
+            for _, _, _, review in topics.all_reviews_iter():
+                if review.push_status != PushStatus.PUSHED or review.status == PrStatus.MERGED:
+                    continue
+                if review.remote_head not in old_bases:
+                    continue
+                old_base_branch = old_bases[review.remote_head]
+                remote_ref = await env.git_ctx.git_stdout("ls-remote", "origin", review.remote_head)
+                remote_commit = remote_ref.split()[0]
+                old_base_ref = await env.git_ctx.git_stdout("ls-remote", "origin", old_base_branch)
+                old_base_commit = old_base_ref.split()[0]
+                count = await env.git_ctx.git_stdout(
+                    "rev-list", "--count", f"{old_base_commit}..{remote_commit}"
+                )
+                if int(count) == 0:
+                    found_empty = True
+                    break
+
+            assert found_empty, "Expected at least one PR with 0 commits (empty diff)"
+
+            shutil.rmtree(bare_dir, ignore_errors=True)
