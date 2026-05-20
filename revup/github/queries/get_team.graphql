@@ -1,0 +1,13 @@
+query GetTeam($org: String!, $slug: String!) {
+  organization(login: $org) {
+    team(slug: $slug) {
+      id
+      members(first: 100) {
+        nodes {
+          login
+        }
+        totalCount
+      }
+    }
+  }
+}

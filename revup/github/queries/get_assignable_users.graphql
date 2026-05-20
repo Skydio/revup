@@ -1,0 +1,11 @@
+query GetAssignableUsers($owner: String!, $name: String!, $query: String!) {
+  repository(owner: $owner, name: $name) {
+    assignableUsers(query: $query, first: 25) {
+      nodes {
+        login
+        id
+      }
+      totalCount
+    }
+  }
+}

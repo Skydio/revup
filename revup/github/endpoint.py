@@ -3,7 +3,7 @@ import datetime
 import json
 import logging
 import time
-from typing import Any, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
 from aiohttp import ClientSession, ContentTypeError
 
@@ -69,7 +69,7 @@ class GitHubEndpoint:
         await asyncio.sleep(delay)
         return True
 
-    async def _graphql_once(self, query: str, **kwargs: Any) -> Any:
+    async def _graphql_once(self, query: str, variables: Optional[Dict[str, Any]] = None) -> Any:
         """Execute a single GraphQL request. Raises on any error."""
         if self.session is None:
             self.session = ClientSession()
@@ -80,12 +80,14 @@ class GitHubEndpoint:
 
         logging.debug("# POST {}".format(self.graphql_endpoint))
         logging.debug("Request GraphQL query:\n{}".format(query))
-        logging.debug("Request GraphQL variables:\n{}".format(json.dumps(kwargs, indent=1)))
+        logging.debug(
+            "Request GraphQL variables:\n{}".format(json.dumps(variables or {}, indent=1))
+        )
 
         start_time = time.time()
         async with self.session.post(
             self.graphql_endpoint,
-            json={"query": query, "variables": kwargs},
+            json={"query": query, "variables": variables or {}},
             headers=headers,
             proxy=self.proxy,
         ) as resp:
@@ -127,11 +129,16 @@ class GitHubEndpoint:
             return r
 
     async def graphql(
-        self, query: str, *, max_retries: int = 3, base_delay: float = 1.0, **kwargs: Any
+        self,
+        query: str,
+        variables: Optional[Dict[str, Any]] = None,
+        *,
+        max_retries: int = 3,
+        base_delay: float = 1.0,
     ) -> Any:
         for attempt in range(max_retries):
             try:
-                return await self._graphql_once(query, **kwargs)
+                return await self._graphql_once(query, variables)
             except RevupRequestException as e:
                 if e.status not in TRANSIENT_STATUSES:
                     raise

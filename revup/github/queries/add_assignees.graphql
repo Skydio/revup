@@ -1,0 +1,5 @@
+mutation AddAssignees($input: AddAssigneesToAssignableInput!) {
+  addAssigneesToAssignable(input: $input) {
+    clientMutationId
+  }
+}

@@ -1,0 +1,45 @@
+[tool.ariadne-codegen]
+schema_path = "revup/github/schema/github.graphql"
+queries_path = "revup/github/queries/"
+target_package_name = "graphql_client"
+target_package_path = "revup/github/"
+client_name = "GitHubGqlClient"
+client_file_name = "client"
+base_client_name = "GitHubBaseClient"
+base_client_file_path = "revup/github/base_client.py"
+async_client = true
+include_all_inputs = false
+include_all_enums = false
+
+[tool.ariadne-codegen.scalars.DateTime]
+type = "str"
+
+[tool.ariadne-codegen.scalars.URI]
+type = "str"
+
+[tool.ariadne-codegen.scalars.GitObjectID]
+type = "str"
+
+[tool.ariadne-codegen.scalars.HTML]
+type = "str"
+
+[tool.ariadne-codegen.scalars.Date]
+type = "str"
+
+[tool.ariadne-codegen.scalars.PreciseDateTime]
+type = "str"
+
+[tool.ariadne-codegen.scalars.GitTimestamp]
+type = "str"
+
+[tool.ariadne-codegen.scalars.GitSSHRemote]
+type = "str"
+
+[tool.ariadne-codegen.scalars.X509Certificate]
+type = "str"
+
+[tool.ariadne-codegen.scalars.Base64String]
+type = "str"
+
+[tool.ariadne-codegen.scalars.BigInt]
+type = "int"

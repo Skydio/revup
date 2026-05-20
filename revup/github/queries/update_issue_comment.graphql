@@ -1,0 +1,5 @@
+mutation UpdateIssueComment($input: UpdateIssueCommentInput!) {
+  updateIssueComment(input: $input) {
+    clientMutationId
+  }
+}

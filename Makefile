@@ -25,7 +25,7 @@ check_types:
 	$(MYPY_COMMAND) revup
 
 pylint:
-	$(PYTHON) -m pylint revup
+	$(PYTHON) -m pylint revup --ignore=graphql_client
 
 # Lint check for formatting and type hints
 # This needs pass before any merge.
@@ -79,4 +79,23 @@ man:
 test:
 	$(PYTHON) -m pytest tests/
 
-.PHONY: all deps man install package format check_format check_types pylint lint clean
+# Download the latest GitHub GraphQL schema
+GITHUB_SCHEMA=revup/github/schema/github.graphql
+github_schema_download:
+	curl -sL "https://raw.githubusercontent.com/octokit/graphql-schema/master/schema.graphql" \
+		-o $(GITHUB_SCHEMA)
+
+# Generate typed Python client from the GraphQL schema and queries.
+# Requires Python 3.9+ with ariadne-codegen installed.
+# Set CODEGEN_PYTHON to a Python 3.9+ interpreter if 'python3' is older.
+CODEGEN_PYTHON ?= python3
+github_codegen:
+	@$(CODEGEN_PYTHON) -c "import sys; assert sys.version_info >= (3, 9), \
+		f'ariadne-codegen requires Python 3.9+, got {sys.version_info[:2]}'" \
+		|| { echo "Set CODEGEN_PYTHON to a Python 3.9+ interpreter"; exit 1; }
+	$(CODEGEN_PYTHON) -m ariadne_codegen client
+	$(PYTHON) scripts/fix_codegen_imports.py revup/github/graphql_client
+	$(BLACK_CMD) revup/github/graphql_client
+	$(ISORT_CMD) revup/github/graphql_client
+
+.PHONY: all deps man install package format check_format check_types pylint lint clean github_schema_download github_codegen

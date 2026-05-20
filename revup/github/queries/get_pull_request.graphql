@@ -1,0 +1,116 @@
+query GetPullRequest(
+  $owner: String!
+  $name: String!
+  $headRefName: String!
+  $maxComments: Int!
+) {
+  repository(owner: $owner, name: $name) {
+    id
+    pullRequests(
+      headRefName: $headRefName
+      states: [OPEN, MERGED]
+      first: 1
+      orderBy: { direction: DESC, field: UPDATED_AT }
+    ) {
+      nodes {
+        id
+        state
+        url
+        baseRefName
+        body
+        title
+        isDraft
+        baseCommit: commits(first: 1) {
+          nodes {
+            commit {
+              parents(first: 1) {
+                nodes {
+                  oid
+                }
+              }
+            }
+          }
+        }
+        headCommit: commits(last: 1) {
+          nodes {
+            commit {
+              oid
+            }
+          }
+        }
+        reviewRequests(first: 25) {
+          nodes {
+            requestedReviewer {
+              ... on User {
+                login
+                id
+              }
+              ... on Team {
+                slug
+                id
+                organization {
+                  login
+                }
+              }
+            }
+          }
+        }
+        timelineItems(
+          itemTypes: [REVIEW_REQUEST_REMOVED_EVENT, UNASSIGNED_EVENT]
+          first: 50
+        ) {
+          nodes {
+            ... on ReviewRequestRemovedEvent {
+              requestedReviewer {
+                ... on User {
+                  login
+                  id
+                }
+              }
+            }
+            ... on UnassignedEvent {
+              assignee {
+                ... on User {
+                  login
+                  id
+                }
+              }
+            }
+          }
+        }
+        latestReviews(first: 25) {
+          nodes {
+            author {
+              ... on User {
+                login
+                id
+              }
+            }
+            viewerDidAuthor
+          }
+        }
+        assignees(first: 25) {
+          nodes {
+            ... on User {
+              login
+              id
+            }
+          }
+        }
+        labels(first: 25) {
+          nodes {
+            name
+            id
+          }
+        }
+        comments(first: $maxComments) {
+          nodes {
+            body
+            id
+          }
+        }
+      }
+      totalCount
+    }
+  }
+}
