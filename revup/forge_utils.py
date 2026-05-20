@@ -125,6 +125,12 @@ async def forge_connection(
         try:
             yield forge
         finally:
+            if endpoint.last_ratelimit_remaining is not None:
+                logging.debug(
+                    "GitHub rate limit: {} points remaining, resets at {}".format(
+                        endpoint.last_ratelimit_remaining, endpoint.last_ratelimit_reset
+                    )
+                )
             await forge.close()
     else:
         raise RevupUsageException(
