@@ -1,6 +1,7 @@
 import argparse
 
 import pytest
+from fake_forge import FakeForge
 from git_env import GitTestEnvironment, async_test
 
 from revup.forge import PrInfo
@@ -1296,3 +1297,522 @@ class TestSkipEmptyFirstCommit:
 
             review = topics.topics["feat"].reviews["origin/main"]
             assert len(review.new_commits) == 2
+
+
+# --- Forge integration tests (using FakeForge) ---
+
+
+def make_forge_upload_args(**kwargs):
+    defaults = {
+        "topics": [],
+        "base_branch": None,
+        "relative_branch": None,
+        "rebase": False,
+        "skip_confirm": True,
+        "dry_run": False,
+        "push_only": False,
+        "status": False,
+        "update_pr_body": True,
+        "create_local_branches": False,
+        "review_graph": True,
+        "trim_tags": False,
+        "patchsets": False,
+        "self_authored_only": False,
+        "labels": None,
+        "auto_add_users": "no",
+        "user_aliases": "",
+        "uploader": "",
+        "branch_format": "user+branch",
+        "pre_upload": None,
+        "relative_chain": False,
+        "auto_topic": False,
+        "head": "HEAD",
+        "skip_empty_first_commit": False,
+        "verbose": False,
+        "force_reviewers": False,
+        "pr_body_source": PrBodySource.FIRST_COMMIT,
+    }
+    defaults.update(kwargs)
+    return argparse.Namespace(**defaults)
+
+
+async def full_upload_pipeline(env, forge, **kwargs):
+    """
+    Run the full upload pipeline including forge query, create, and update.
+    Mirrors upload.py's logic but skips push (no real remote).
+    """
+    env.git_ctx.clear_cache()
+    args = make_forge_upload_args(**kwargs)
+    topics = TopicStack(
+        env.git_ctx,
+        args.base_branch,
+        args.relative_branch,
+        forge,
+        args.head,
+    )
+    await topics.populate_topics(
+        auto_topic=args.auto_topic,
+        trim_tags=args.trim_tags,
+        raise_on_invalid=True,
+    )
+    await topics.populate_reviews(
+        force_relative_chain=args.relative_chain,
+        labels=args.labels,
+        user_aliases=args.user_aliases,
+        auto_add_users=args.auto_add_users,
+        self_authored_only=args.self_authored_only,
+        limit_topics=args.topics if args.topics else None,
+    )
+    await topics.populate_relative_reviews(
+        args.uploader if args.uploader else env.git_ctx.author,
+        branch_format=args.branch_format,
+    )
+    await topics.query()
+    await topics.fetch_git_refs()
+    await topics.mark_rebases(not args.rebase)
+    await topics.create_commits(args.trim_tags, args.skip_empty_first_commit)
+    topics.populate_update_info(args.update_pr_body, args.force_reviewers, args.pr_body_source)
+    if args.review_graph:
+        topics.populate_review_graph()
+    await topics.create_prs()
+    await topics.update_prs()
+    return topics
+
+
+class TestForgeCreatePrs:
+    @async_test
+    async def test_new_topic_creates_pr(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.commit("feat title\n\nbody text\n\nTopic: alpha", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge)
+
+            assert len(forge.created_prs) == 1
+            pr = forge.created_prs[0]
+            assert pr.title == "feat title"
+            assert "body text" in pr.body
+            assert pr.baseRef == "main"
+
+    @async_test
+    async def test_multiple_topics_create_separate_prs(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.commit("alpha\n\nTopic: alpha", {"a.txt": "a"})
+            await env.commit("beta\n\nTopic: beta", {"b.txt": "b"})
+
+            await full_upload_pipeline(env, forge)
+
+            assert len(forge.created_prs) == 2
+            titles = {pr.title for pr in forge.created_prs}
+            assert titles == {"alpha", "beta"}
+
+    @async_test
+    async def test_relative_topic_targets_parent_branch(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.commit("parent\n\nTopic: parent", {"a.txt": "a"})
+            await env.commit("child\n\nTopic: child\nRelative: parent", {"b.txt": "b"})
+
+            await full_upload_pipeline(env, forge)
+
+            parent_pr = next(pr for pr in forge.created_prs if pr.title == "parent")
+            child_pr = next(pr for pr in forge.created_prs if pr.title == "child")
+            assert parent_pr.baseRef == "main"
+            assert child_pr.baseRef == parent_pr.headRef
+
+
+class TestForgeUpdatePrs:
+    @async_test
+    async def test_second_upload_updates_existing_pr(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.commit("feat\n\nTopic: alpha", {"a.txt": "v1"})
+
+            await full_upload_pipeline(env, forge)
+            assert len(forge.created_prs) == 1
+            forge.created_prs.clear()
+
+            await env.stage_file("a.txt", "v2")
+            await env.git_ctx.git("commit", "--amend", "-m", "feat updated\n\nTopic: alpha")
+
+            await full_upload_pipeline(env, forge)
+
+            assert len(forge.created_prs) == 0
+            assert any(u.title == "feat updated" for u in forge.updated_prs)
+
+    @async_test
+    async def test_update_pr_body_false_skips_body_update(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.commit("title\n\noriginal body\n\nTopic: alpha", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge)
+
+            await env.git_ctx.git("commit", "--amend", "-m", "title\n\nnew body\n\nTopic: alpha")
+            forge.updated_prs.clear()
+
+            await full_upload_pipeline(env, forge, update_pr_body=False)
+
+            body_updates = [u for u in forge.updated_prs if u.body is not None]
+            assert len(body_updates) == 0
+
+    @async_test
+    async def test_update_pr_body_tag_overrides_flag(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.commit("title\n\nbody\n\nTopic: alpha\nUpdate-Pr-Body: false", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge)
+
+            await env.git_ctx.git(
+                "commit",
+                "--amend",
+                "-m",
+                "title\n\nnew body\n\nTopic: alpha\nUpdate-Pr-Body: false",
+            )
+            forge.updated_prs.clear()
+
+            await full_upload_pipeline(env, forge, update_pr_body=True)
+
+            body_updates = [u for u in forge.updated_prs if u.body is not None]
+            assert len(body_updates) == 0
+
+
+class TestForgeReviewers:
+    @async_test
+    async def test_reviewers_resolved_to_ids(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge(users={"alice": ("id_alice", "alice-full")})
+            await env.commit("feat\n\nTopic: alpha\nReviewer: alice", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge)
+
+            assert len(forge.updated_prs) > 0
+            update = forge.updated_prs[0]
+            assert "id_alice" in update.reviewer_ids
+
+    @async_test
+    async def test_unknown_reviewer_silently_skipped(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge(users={"alice": ("id_alice", "alice-full")})
+            await env.commit("feat\n\nTopic: alpha\nReviewer: alice, ghost", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge)
+
+            update = forge.updated_prs[0]
+            assert "id_alice" in update.reviewer_ids
+            assert len(update.reviewer_ids) == 1
+
+    @async_test
+    async def test_removed_reviewer_not_re_added(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge(users={"bob": ("id_bob", "bob-full")})
+            await env.commit("feat\n\nTopic: alpha\nReviewer: bob", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge)
+
+            # Simulate bob being removed on the forge
+            pr = list(forge.prs.values())[0]
+            pr.reviewers = set()
+            pr.reviewer_ids = set()
+            pr.removed_reviewers = {"bob-full"}
+            pr.removed_reviewer_ids = {"id_bob"}
+            forge.updated_prs.clear()
+
+            await env.stage_file("a.txt", "a2")
+            await env.git_ctx.git("commit", "--amend", "-m", "feat\n\nTopic: alpha\nReviewer: bob")
+
+            await full_upload_pipeline(env, forge)
+
+            reviewer_ids = set()
+            for u in forge.updated_prs:
+                reviewer_ids |= u.reviewer_ids
+            assert "id_bob" not in reviewer_ids
+
+    @async_test
+    async def test_force_reviewers_re_adds_removed(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge(users={"bob": ("id_bob", "bob-full")})
+            await env.commit("feat\n\nTopic: alpha\nReviewer: bob", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge)
+
+            pr = list(forge.prs.values())[0]
+            pr.reviewers = set()
+            pr.reviewer_ids = set()
+            pr.removed_reviewers = {"bob-full"}
+            pr.removed_reviewer_ids = {"id_bob"}
+            forge.updated_prs.clear()
+
+            await env.stage_file("a.txt", "a2")
+            await env.git_ctx.git("commit", "--amend", "-m", "feat\n\nTopic: alpha\nReviewer: bob")
+
+            await full_upload_pipeline(env, forge, force_reviewers=True)
+
+            reviewer_ids = set()
+            for u in forge.updated_prs:
+                reviewer_ids |= u.reviewer_ids
+            assert "id_bob" in reviewer_ids
+
+    @async_test
+    async def test_team_reviewer_resolved(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge(teams={"myorg/backend": ("team_1", {"alice", "bob"})})
+            await env.commit("feat\n\nTopic: alpha\nReviewer: myorg/backend", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge)
+
+            update = forge.updated_prs[0]
+            assert "team_1" in update.reviewer_team_ids
+
+    @async_test
+    async def test_team_not_re_requested_if_member_reviewing(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge(teams={"myorg/backend": ("team_1", {"alice", "bob"})})
+            await env.commit("feat\n\nTopic: alpha\nReviewer: myorg/backend", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge)
+
+            # Simulate: team resolved, alice is now a reviewer
+            pr = list(forge.prs.values())[0]
+            pr.reviewers = {"alice"}
+            pr.reviewer_ids = {"id_alice"}
+            pr.reviewer_teams = set()
+            pr.reviewer_team_ids = set()
+            forge.updated_prs.clear()
+
+            await env.stage_file("a.txt", "a2")
+            await env.git_ctx.git(
+                "commit",
+                "--amend",
+                "-m",
+                "feat\n\nTopic: alpha\nReviewer: myorg/backend",
+            )
+
+            await full_upload_pipeline(env, forge)
+
+            team_ids = set()
+            for u in forge.updated_prs:
+                team_ids |= u.reviewer_team_ids
+            assert "team_1" not in team_ids
+
+
+class TestForgeLabels:
+    @async_test
+    async def test_labels_resolved_to_ids(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge(labels={"bug": "label_1", "main": "label_main"})
+            await env.commit("feat\n\nTopic: alpha\nLabel: bug", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge)
+
+            update = forge.updated_prs[0]
+            assert "label_1" in update.label_ids
+
+    @async_test
+    async def test_base_branch_label_auto_added(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge(labels={"main": "label_main"})
+            await env.commit("feat\n\nTopic: alpha", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge)
+
+            update = forge.updated_prs[0]
+            assert "label_main" in update.label_ids
+
+    @async_test
+    async def test_draft_label_creates_draft_pr(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.commit("feat\n\nTopic: alpha\nLabel: draft", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge)
+
+            pr = forge.created_prs[0]
+            assert pr.is_draft is True
+
+
+class TestForgeReviewGraph:
+    @async_test
+    async def test_review_graph_comment_created_for_chain(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.commit("parent\n\nTopic: parent", {"a.txt": "a"})
+            await env.commit("child\n\nTopic: child\nRelative: parent", {"b.txt": "b"})
+
+            await full_upload_pipeline(env, forge, review_graph=True)
+
+            comments = []
+            for u in forge.updated_prs:
+                comments.extend(u.comments)
+            graph_comments = [c for c in comments if "Reviews in this chain" in c.text]
+            assert len(graph_comments) >= 2
+
+    @async_test
+    async def test_no_review_graph_when_disabled(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.commit("parent\n\nTopic: parent", {"a.txt": "a"})
+            await env.commit("child\n\nTopic: child\nRelative: parent", {"b.txt": "b"})
+
+            await full_upload_pipeline(env, forge, review_graph=False)
+
+            comments = []
+            for u in forge.updated_prs:
+                comments.extend(u.comments)
+            graph_comments = [c for c in comments if "Reviews in this chain" in c.text]
+            assert len(graph_comments) == 0
+
+
+class TestForgePrBodySource:
+    @async_test
+    async def test_squashed_body_on_create(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.commit("title\n\nfirst body\n\nTopic: alpha", {"a.txt": "a"})
+            await env.commit("second\n\nsecond body\n\nTopic: alpha", {"b.txt": "b"})
+
+            await full_upload_pipeline(env, forge, pr_body_source=PrBodySource.SQUASHED)
+
+            pr = forge.created_prs[0]
+            assert "first body" in pr.body
+            assert "second body" in pr.body
+
+    @async_test
+    async def test_template_body_on_create(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.write_file(".github/PULL_REQUEST_TEMPLATE.md", "## Summary\n\n## Tests\n")
+            await env.commit("feat\n\nTopic: alpha", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge, pr_body_source=PrBodySource.TEMPLATE)
+
+            pr = forge.created_prs[0]
+            assert "## Summary" in pr.body
+
+
+class TestForgeMergedPr:
+    @async_test
+    async def test_merged_pr_with_same_content_stays_merged(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.commit("feat\n\nTopic: alpha", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge, review_graph=False)
+
+            pr = list(forge.prs.values())[0]
+            pr.state = "MERGED"
+            forge.created_prs.clear()
+
+            topics = await full_upload_pipeline(env, forge, review_graph=False)
+
+            assert len(forge.created_prs) == 0
+            review = topics.topics["alpha"].reviews["origin/main"]
+            assert review.status == PrStatus.MERGED
+
+    @async_test
+    async def test_merged_pr_with_new_content_creates_new(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.commit("feat\n\nTopic: alpha", {"a.txt": "v1"})
+
+            await full_upload_pipeline(env, forge, review_graph=False)
+
+            pr = list(forge.prs.values())[0]
+            pr.state = "MERGED"
+            forge.created_prs.clear()
+
+            await env.stage_file("a.txt", "v2")
+            await env.git_ctx.git("commit", "--amend", "-m", "feat\n\nTopic: alpha")
+
+            await full_upload_pipeline(env, forge, review_graph=False)
+
+            assert len(forge.created_prs) == 1
+
+
+class TestForgeNumReviewsChanged:
+    @async_test
+    async def test_no_change_means_zero(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.commit("feat\n\nTopic: alpha", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge, review_graph=False)
+            forge.created_prs.clear()
+            forge.updated_prs.clear()
+
+            topics = await full_upload_pipeline(env, forge, review_graph=False)
+            assert topics.num_reviews_changed() == 0
+
+    @async_test
+    async def test_new_topic_counted(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.commit("feat\n\nTopic: alpha", {"a.txt": "a"})
+
+            topics = await full_upload_pipeline(env, forge, review_graph=False)
+            assert topics.num_reviews_changed() == 1
+
+
+class TestForgeAssignees:
+    @async_test
+    async def test_assignees_resolved(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge(users={"bob": ("id_bob", "bob-full")})
+            await env.commit("feat\n\nTopic: alpha\nAssignee: bob", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge)
+
+            update = forge.updated_prs[0]
+            assert "id_bob" in update.assignee_ids
+
+    @async_test
+    async def test_auto_add_users_r2a(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge(users={"alice": ("id_alice", "alice-full")})
+            await env.commit("feat\n\nTopic: alpha\nReviewer: alice", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge, auto_add_users="r2a")
+
+            update = forge.updated_prs[0]
+            assert "id_alice" in update.assignee_ids
+            assert "id_alice" in update.reviewer_ids
+
+    @async_test
+    async def test_auto_add_users_a2r(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge(users={"bob": ("id_bob", "bob-full")})
+            await env.commit("feat\n\nTopic: alpha\nAssignee: bob", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge, auto_add_users="a2r")
+
+            update = forge.updated_prs[0]
+            assert "id_bob" in update.reviewer_ids
+            assert "id_bob" in update.assignee_ids
