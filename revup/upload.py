@@ -1,5 +1,7 @@
 import argparse
+import enum
 import subprocess
+from typing import AsyncGenerator, Tuple
 
 from rich import get_console
 
@@ -8,13 +10,33 @@ from revup.forge import Forge
 from revup.types import RevupShellException
 
 
+class UploadPhase(enum.Enum):
+    POPULATED = "populated"
+    QUERIED = "queried"
+    COMMITS_CREATED = "commits_created"
+    READY_TO_PUSH = "ready_to_push"
+    PUSHED = "pushed"
+    PRS_UPDATED = "prs_updated"
+
+
 async def main(
     args: argparse.Namespace,
     git_ctx: git.Git,
     forge: Forge,
 ) -> int:
+    async for _ in run(args, git_ctx, forge):
+        pass
+    return 0
+
+
+async def run(
+    args: argparse.Namespace,
+    git_ctx: git.Git,
+    forge: Forge,
+    skip_push: bool = False,
+) -> AsyncGenerator[Tuple[UploadPhase, topic_stack.TopicStack], None]:
     """
-    Handles the "upload" command.
+    Core upload logic as an async generator yielding (phase, topics) at each stage.
     """
     topics = topic_stack.TopicStack(
         git_ctx,
@@ -42,38 +64,39 @@ async def main(
             branch_format=args.branch_format,
         )
 
+    yield UploadPhase.POPULATED, topics
+
     if not args.dry_run and not args.push_only:
         with get_console().status(f"Querying {forge.name}…"):
             await topics.query()
-            # Fetch uses the oid results from the query
             await topics.fetch_git_refs()
-
-            # Rebase detection uses object results from query / fetch
             await topics.mark_rebases(not args.rebase)
+
+    yield UploadPhase.QUERIED, topics
 
     if args.status or args.verbose:
         topics.print(skip_empty=False)
 
     if args.status:
-        return 0
+        return
 
     with get_console().status("Creating commits…"):
-        # Need to know rebase information before creating commits
         await topics.create_commits(args.trim_tags, args.skip_empty_first_commit)
+
+    yield UploadPhase.COMMITS_CREATED, topics
 
     if args.dry_run:
         topics.print(not args.verbose)
-        return 0
+        return
 
     if not args.push_only:
         topics.populate_update_info(args.update_pr_body, args.force_reviewers, args.pr_body_source)
     if not args.skip_confirm and topics.num_reviews_changed() > 0:
         topics.print(not args.verbose)
         if git_ctx.sh.wait_for_confirmation():
-            return 1
+            return
 
     if args.pre_upload:
-        # Wait until we're sure there aren't any conflicts before running pre upload command
         with get_console().status("Running pre-upload command"):
             result = subprocess.run(
                 args.pre_upload,
@@ -87,32 +110,34 @@ async def main(
             if result.returncode != 0:
                 raise RevupShellException(f"Pre-upload command failed:\n{result.stdout}")
 
-    with get_console().status("Pushing remote branches…"):
-        if args.patchsets:
-            # Patchsets require completed commit ids
-            await topics.populate_patchsets()
-        if not args.push_only:
-            await topics.retarget_orphaned_prs()
-        # Must push refs after creating them. Includes the virtual diff branch for patchsets.
-        await topics.push_git_refs(git_ctx.author, args.create_local_branches)
+    yield UploadPhase.READY_TO_PUSH, topics
+
+    if not skip_push:
+        with get_console().status("Pushing remote branches…"):
+            if args.patchsets:
+                await topics.populate_patchsets()
+            if not args.push_only:
+                await topics.retarget_orphaned_prs()
+            await topics.push_git_refs(git_ctx.author, args.create_local_branches)
+
+    yield UploadPhase.PUSHED, topics
 
     if args.push_only:
         topics.print(not args.verbose)
-        return 0
+        return
 
     try:
-        # Must create PRs after refs are pushed, and must update PRs after creating them.
         with get_console().status(f"Updating {forge.name} PRs…"):
             await topics.create_prs()
             if args.review_graph:
-                # Review graph requires populated PR urls from creation
                 topics.populate_review_graph()
             await topics.update_prs()
 
-        if topics.use_reordering_workaround:
+        if not skip_push and topics.use_reordering_workaround:
             topics.use_reordering_workaround = False
             with get_console().status("Pushing again to work around reordering issues…"):
                 await topics.push_git_refs(git_ctx.author, create_local_branches=False)
     finally:
         topics.print(not args.verbose)
-    return 0
+
+    yield UploadPhase.PRS_UPDATED, topics
