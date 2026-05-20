@@ -10,7 +10,6 @@ from aiohttp import ClientSession, ContentTypeError
 from revup.types import RevupForgeException, RevupRequestException
 
 TRANSIENT_STATUSES = frozenset({500, 502, 503, 504})
-RETRYABLE_GRAPHQL_ERRORS = frozenset({"RESOURCE_LIMITS_EXCEEDED"})
 
 
 class GitHubEndpoint:
@@ -127,7 +126,12 @@ class GitHubEndpoint:
             return r
 
     async def graphql(
-        self, query: str, *, max_retries: int = 3, base_delay: float = 1.0, **kwargs: Any
+        self,
+        query: str,
+        *,
+        max_retries: int = 3,
+        base_delay: float = 1.0,
+        **kwargs: Any,
     ) -> Any:
         for attempt in range(max_retries):
             try:
@@ -136,12 +140,5 @@ class GitHubEndpoint:
                 if e.status not in TRANSIENT_STATUSES:
                     raise
                 msg = "GitHub returned {}".format(e.status)
-                if not await self._should_retry(attempt, max_retries, base_delay, msg):
-                    raise
-            except RevupForgeException as e:
-                retryable = set(e.types) & RETRYABLE_GRAPHQL_ERRORS
-                if not retryable:
-                    raise
-                msg = "GitHub GraphQL error ({})".format(", ".join(retryable))
                 if not await self._should_retry(attempt, max_retries, base_delay, msg):
                     raise
