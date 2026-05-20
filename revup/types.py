@@ -70,7 +70,7 @@ class RevupShellException(Exception):
 
 
 class RevupForgeException(Exception):
-    def __init__(self, error_json: Dict):
+    def __init__(self, error_json: List[Dict]):
         super().__init__()
         self.error_json = error_json
         messages = []
