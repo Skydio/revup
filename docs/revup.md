@@ -98,6 +98,18 @@ expressions that match all possible base branches. Used to determine
 which branches are supported by base branch detection. See manpage of
 git-for-each-ref/fnmatch(3) for more info on glob syntax.
 
+**--gpg-sign, --no-gpg-sign**
+: Sign commits that revup creates internally (cherry-picks, synthetic
+commits, and virtual diff targets) with GPG or SSH. This is required
+for repositories that enforce verified-signature rules on pushed
+branches. If not specified, the value of `git config commit.gpgSign`
+is used. Signing uses the key configured by `user.signingKey` and
+the format from `gpg.format`.
+
+Note: `git commit-tree` (the plumbing command revup uses to create
+commits) intentionally ignores `commit.gpgSign`, which is why revup
+must read it explicitly and pass `-S` itself.
+
 # REVUP COMMANDS
 
 Revup is comprised of several sub-commands.

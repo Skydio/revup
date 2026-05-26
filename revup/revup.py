@@ -62,6 +62,7 @@ def make_toplevel_parser() -> RevupArgParser:
     revup_parser.add_argument("--main-branch", default="main")
     revup_parser.add_argument("--base-branch-globs", default="")
     revup_parser.add_argument("--git-version", default="2.43.0")
+    revup_parser.add_argument("--gpg-sign", action="store_true", default=None)
     for s in ShellType:
         revup_parser.add_argument(
             f"--prompt-completion-{s.value}", default="", help=argparse.SUPPRESS
@@ -107,6 +108,7 @@ async def get_git(args: argparse.Namespace) -> git.Git:
         args.base_branch_globs,
         args.keep_temp,
         args.editor,
+        args.gpg_sign,
     )
 
     return git_ctx

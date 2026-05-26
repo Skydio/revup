@@ -135,6 +135,7 @@ async def make_git(
     base_branch_globs: str = "",
     keep_temp: bool = False,
     editor: str = "",
+    gpg_sign: Optional[bool] = None,
 ) -> "Git":
     if not git_path:
         git_path = get_default_git()
@@ -157,6 +158,12 @@ async def make_git(
             ret = os.environ.get("GIT_EDITOR", os.environ.get("EDITOR", "nano"))
         return ret
 
+    async def get_gpg_sign() -> bool:
+        if gpg_sign is not None:
+            return gpg_sign
+        val = await git_ctx.git_stdout("config", "--get", "commit.gpgSign", raiseonerror=False)
+        return val.strip().lower() in ("true", "yes", "on", "1")
+
     (
         repo_root,
         git_dir,
@@ -172,6 +179,7 @@ async def make_git(
         get_editor(),
         git_ctx.is_branch_or_commit(f"{remote_name}/{main_branch}"),
     )
+    gpg_sign_enabled = await get_gpg_sign()
 
     if git_version:
         version_arr = [int(v) for v in git_version.split(".")]
@@ -190,6 +198,7 @@ async def make_git(
     git_ctx.email = email.lower()
     git_ctx.author = git_ctx.email.split("@")[0]
     git_ctx.editor = editor
+    git_ctx.gpg_sign = gpg_sign_enabled
     if not main_exists:
         if main_branch in COMMON_MAIN_BRANCHES:
             git_ctx.main_branch = COMMON_MAIN_BRANCHES[1 - COMMON_MAIN_BRANCHES.index(main_branch)]
@@ -230,6 +239,7 @@ class Git:
     email: str
     author: str
     editor: str
+    gpg_sign: bool
 
     def __init__(
         self,
@@ -245,6 +255,7 @@ class Git:
         self.remote_name = remote_name
         self.keep_temp = keep_temp
         self.main_branch = main_branch
+        self.gpg_sign = False
         self.base_branch_globs = base_branch_globs.strip().splitlines()
         self.temp_dir = tempfile.TemporaryDirectory(  # pylint: disable=consider-using-with
             prefix="revup_"
@@ -580,6 +591,10 @@ class Git:
             "-m",
             commit_info.commit_msg,
         ]
+        if self.gpg_sign:
+            # git commit-tree (a plumbing command) intentionally ignores
+            # commit.gpgSign, so we pass -S explicitly when signing is enabled.
+            commit_tree_args.insert(2, "-S")
         for p in commit_info.parents:
             commit_tree_args.extend(["-p", p])
         ret = await self.git_stdout(*commit_tree_args, env=git_env)
