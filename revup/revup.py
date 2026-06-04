@@ -76,6 +76,26 @@ def get_config_path() -> str:
     )
 
 
+def get_ancestor_config_paths(repo_root: str, user_config_path: str) -> List[str]:
+    """Find config files in directories above the repo root.
+
+    This lets a single config placed above a tree of nested git repos apply to all of
+    them (closest config to the repo wins), without having to commit a config into each
+    repo. The user config is excluded so it isn't read twice. Ordered nearest-first.
+    """
+    paths: List[str] = []
+    current = os.path.dirname(os.path.abspath(repo_root))
+    while True:
+        candidate = os.path.join(current, CONFIG_FILE_NAME)
+        if candidate != user_config_path and os.path.isfile(candidate):
+            paths.append(candidate)
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+    return paths
+
+
 async def get_config() -> config.Config:
     config_path = get_config_path()
     if os.path.isfile(config_path) and hasattr(os, "getuid"):
@@ -91,7 +111,11 @@ async def get_config() -> config.Config:
     # to find the path of the config file. Just this once, we use the default.
     sh = shell.Shell()
     repo_root = (await sh.sh(git.get_default_git(), "rev-parse", "--show-toplevel"))[1].rstrip()
-    conf = config.Config(config_path, os.path.join(repo_root, CONFIG_FILE_NAME))
+    conf = config.Config(
+        config_path,
+        os.path.join(repo_root, CONFIG_FILE_NAME),
+        get_ancestor_config_paths(repo_root, config_path),
+    )
     conf.read()
     return conf
 

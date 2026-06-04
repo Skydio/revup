@@ -231,7 +231,7 @@ the case where you rebase then upload and will show you a diff with upstream fil
 
 Revup is highly configurable using a standard config file format. Every flag is also a config option, so users can get the exact behavior they need.
 
-Flags specified on the command line take precedence, followed by config in `~/.revupconfig`, followed by `.revupconfig` in the current repo.
+Flags specified on the command line take precedence, followed by config in `~/.revupconfig`, followed by `.revupconfig` in the current repo, followed by any `.revupconfig` in directories above the repo root (closest wins).
 
 ## Repo config
 
@@ -246,6 +246,16 @@ base_branch_globs =
     rel[1-9].[0-9]
     rel[1-9].[0-9][0-9]
 ```
+
+## Shared config for many repos
+
+If you have many git repos checked out under a common directory (for example,
+repos managed by Android's `repo` tool), you can place a single `.revupconfig`
+in a directory above them instead of committing one into every repo. Revup walks
+up from each repo's root and reads the nearest `.revupconfig` it finds, so one
+file can configure the `main_branch` and release branch naming for the whole
+tree. A config closer to a given repo takes precedence, so individual repos can
+still override the shared settings with their own `.revupconfig`.
 
 ## User config
 

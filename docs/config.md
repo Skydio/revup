@@ -10,13 +10,19 @@ revup config - Edit revup configuration files.
 
 Revup stores some persistent configuration values in a python configparser
 compatible format. A repo specific configuration is read from the root of
-the current git repo in a ".revupconfig" file. A user configuration is read
-from REVUP_CONFIG_PATH if available, otherwise from the default path of
-~/.revupconfig. Any flag or argument to a revup command can
-be configured. Revup loads options in this order:
+the current git repo in a ".revupconfig" file. Revup also searches directories
+above the repo root and reads any ".revupconfig" files it finds there. This
+lets a single config placed above a tree of nested git repos apply to all of
+them (for example, repos managed by Android's "repo" tool) without committing a
+config into each one. A user configuration is read from REVUP_CONFIG_PATH if
+available, otherwise from the default path of ~/.revupconfig. Any flag or
+argument to a revup command can be configured. Revup loads options in this
+order:
 
 - The program has built in defaults that are given in the manual.
-- Repo configs take precedence over the above.
+- Ancestor configs above the repo root take precedence over the above, with
+  configs closer to the repo root taking precedence over those further away.
+- The repo config (".revupconfig" in the repo root) takes precedence over the above.
 - User configs take precedence over the above.
 - Command line flags specified by the user take highest precedence.
 

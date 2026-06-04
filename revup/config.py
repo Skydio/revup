@@ -106,20 +106,37 @@ class Config:
     # Path to user global config file
     config_path: str
 
-    # Path to config file in current repo
+    # Path to config file in current repo (also the write target for --repo)
     repo_config_path: str
+
+    # Paths to .revupconfig files found in directories above the repo root, ordered
+    # nearest-first. These let a single config above a tree of nested repos apply to
+    # all of them, with closer configs taking precedence.
+    ancestor_config_paths: List[str]
 
     # Whether the config contains values that need to be flushed to the file
     dirty: bool = False
 
-    def __init__(self, config_path: str, repo_config_path: str = ""):
+    def __init__(
+        self,
+        config_path: str,
+        repo_config_path: str = "",
+        ancestor_config_paths: Optional[List[str]] = None,
+    ):
         self.config = configparser.ConfigParser()
         self.config_path = config_path
         self.repo_config_path = repo_config_path
+        self.ancestor_config_paths = ancestor_config_paths or []
         self.file_configs: List[Tuple[str, configparser.ConfigParser]] = []
 
     def read(self) -> None:
-        for path in (self.repo_config_path, self.config_path):
+        # Read lowest precedence first so later files override earlier ones:
+        # farthest ancestor, ..., nearest ancestor, repo root, then user config.
+        paths = list(reversed(self.ancestor_config_paths)) + [
+            self.repo_config_path,
+            self.config_path,
+        ]
+        for path in paths:
             if not path:
                 continue
             file_conf = configparser.ConfigParser()
