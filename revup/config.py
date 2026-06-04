@@ -106,20 +106,37 @@ class Config:
     # Path to user global config file
     config_path: str
 
-    # Path to config file in current repo
+    # Path to config file in current repo (also the write target for --repo)
     repo_config_path: str
+
+    # Path to a shared config at the root of a "repo" tool checkout (the
+    # directory containing .repo), used as a fallback when the current git repo
+    # is one project of such a checkout. None if not in a repo checkout.
+    repo_tool_config_path: Optional[str]
 
     # Whether the config contains values that need to be flushed to the file
     dirty: bool = False
 
-    def __init__(self, config_path: str, repo_config_path: str = ""):
+    def __init__(
+        self,
+        config_path: str,
+        repo_config_path: str = "",
+        repo_tool_config_path: Optional[str] = None,
+    ):
         self.config = configparser.ConfigParser()
         self.config_path = config_path
         self.repo_config_path = repo_config_path
+        self.repo_tool_config_path = repo_tool_config_path
         self.file_configs: List[Tuple[str, configparser.ConfigParser]] = []
 
     def read(self) -> None:
-        for path in (self.repo_config_path, self.config_path):
+        # Read lowest precedence first so later files override earlier ones.
+        paths = [
+            self.repo_tool_config_path,
+            self.repo_config_path,
+            self.config_path,
+        ]
+        for path in paths:
             if not path:
                 continue
             file_conf = configparser.ConfigParser()
