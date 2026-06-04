@@ -28,6 +28,15 @@ from revup.types import (
 
 MAX_COMMENTS_TO_QUERY = 3
 
+# GitHub returns this GraphQL error type when a single request consumes too many
+# server-side resources. Unlike the documented 500k node limit (a static up-front
+# rejection), this is a runtime budget hit partway through execution: the response
+# contains partial data for the sub-operations that did run plus this error for the
+# ones that didn't. There is no published formula or threshold, so we can't predict
+# it; instead we send a batch, and if we get this error we split the batch in half
+# and retry until it fits.
+RESOURCE_LIMITS_EXCEEDED = "RESOURCE_LIMITS_EXCEEDED"
+
 
 @dataclass
 class PrComment:
@@ -516,6 +525,32 @@ async def _query_prs_batch(
     return prs
 
 
+async def _query_prs_with_splitting(
+    github_ep: github.GitHubEndpoint,
+    repo_info: GitHubRepoInfo,
+    head_refs: List[str],
+) -> List[Optional[PrInfo]]:
+    """
+    Query PRs for head_refs, halving the batch and retrying on RESOURCE_LIMITS_EXCEEDED.
+
+    The query path is read-only, so splitting and concatenating results is always safe.
+    Raises if a single ref still exceeds the limit (can't split further).
+    """
+    try:
+        return await _query_prs_batch(github_ep, repo_info, head_refs)
+    except RevupGithubException as e:
+        if RESOURCE_LIMITS_EXCEEDED not in e.types or len(head_refs) <= 1:
+            raise
+        logging.warning(
+            "GitHub GraphQL RESOURCE_LIMITS_EXCEEDED querying %d PRs, splitting batch in half",
+            len(head_refs),
+        )
+        mid = len(head_refs) // 2
+        prs = await _query_prs_with_splitting(github_ep, repo_info, head_refs[:mid])
+        prs.extend(await _query_prs_with_splitting(github_ep, repo_info, head_refs[mid:]))
+        return prs
+
+
 async def query_everything(
     github_ep: github.GitHubEndpoint,
     repo_info: GitHubRepoInfo,
@@ -558,7 +593,9 @@ async def query_everything(
     batch_size = github_ep.batch_size
     prs: List[Optional[PrInfo]] = []
     for i in range(0, len(head_refs), batch_size):
-        prs.extend(await _query_prs_batch(github_ep, repo_info, head_refs[i : i + batch_size]))
+        prs.extend(
+            await _query_prs_with_splitting(github_ep, repo_info, head_refs[i : i + batch_size])
+        )
 
     return (
         repo_id,
@@ -955,13 +992,40 @@ async def _update_pull_requests_batch(
         )
 
 
+async def _update_with_splitting(github_ep: github.GitHubEndpoint, prs: List[PrUpdate]) -> None:
+    """
+    Update prs, halving the batch and retrying on RESOURCE_LIMITS_EXCEEDED.
+
+    RESOURCE_LIMITS_EXCEEDED is a *partial* success: GitHub applies some sub-mutations
+    (including addComments) before running out of budget. Resending the same request as-is
+    would re-post those comments, so we first run _refresh_new_comment_ids to convert
+    already-posted comments into edits, then split the batch and retry the halves.
+    Raises if a single PR's update still exceeds the limit (can't split PRs further).
+    """
+    try:
+        await _update_pull_requests_batch(github_ep, prs)
+    except RevupGithubException as e:
+        if RESOURCE_LIMITS_EXCEEDED not in e.types or len(prs) <= 1:
+            raise
+        logging.warning(
+            "GitHub GraphQL RESOURCE_LIMITS_EXCEEDED updating %d PRs, splitting batch in half",
+            len(prs),
+        )
+        # Some sub-mutations already applied; convert posted comments to edits so the
+        # retry doesn't duplicate them.
+        await _refresh_new_comment_ids(github_ep, prs)
+        mid = len(prs) // 2
+        await _update_with_splitting(github_ep, prs[:mid])
+        await _update_with_splitting(github_ep, prs[mid:])
+
+
 async def update_pull_requests(github_ep: github.GitHubEndpoint, prs: List[PrUpdate]) -> None:
     """
     Update the given pull request contents, and also add reviewers and labels.
     """
     batch_size = github_ep.batch_size
     for i in range(0, len(prs), batch_size):
-        await _update_pull_requests_batch(github_ep, prs[i : i + batch_size])
+        await _update_with_splitting(github_ep, prs[i : i + batch_size])
 
 
 RE_PR_URL = re.compile(
