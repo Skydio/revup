@@ -1,0 +1,7 @@
+[tool.ruff]
+line-length = 100
+target-version = "py38"
+extend-exclude = ["build", ".eggs"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["revup"]

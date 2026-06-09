@@ -8,17 +8,16 @@ all: deps lint man package install
 deps:
 	$(PYTHON) -m pip install .[dev]
 
-# Format using black
-BLACK_CMD=$(PYTHON) -m black --line-length 100 -t py38 --preview --exclude "build/.*|\.eggs/.*"
-ISORT_CMD=$(PYTHON) -m isort --profile black --py 38
+# Format using ruff
+RUFF_CMD=$(PYTHON) -m ruff
 format:
-	$(BLACK_CMD) .
-	$(ISORT_CMD) .
+	$(RUFF_CMD) format .
+	$(RUFF_CMD) check --select I --fix .
 
-# Check formatting using black
+# Check formatting using ruff
 check_format:
-	$(BLACK_CMD) --check --diff .
-	$(ISORT_CMD) --check --diff .
+	$(RUFF_CMD) format --check --diff .
+	$(RUFF_CMD) check --select I --diff .
 
 MYPY_COMMAND=$(PYTHON) -m mypy --show-error-codes
 check_types:
