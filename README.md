@@ -231,7 +231,7 @@ the case where you rebase then upload and will show you a diff with upstream fil
 
 Revup is highly configurable using a standard config file format. Every flag is also a config option, so users can get the exact behavior they need.
 
-Flags specified on the command line take precedence, followed by config in `~/.revupconfig`, followed by `.revupconfig` in the current repo.
+Flags specified on the command line take precedence, followed by `.revupconfig` in the current repo's `.git` directory, followed by `.revupconfig` at the repo root, followed by `~/.revupconfig`.
 
 ## Repo config
 
@@ -257,6 +257,10 @@ For example, after getting used to the workflow, a user might not need the confi
 [upload]
 skip_confirm = True
 ```
+
+## Git-dir config
+
+A `.revupconfig` placed inside the current repo's `.git` directory has the highest config-file precedence and is not tracked by git. This is useful for per-checkout overrides that should not be shared with other contributors.
 
 # Appendix
 

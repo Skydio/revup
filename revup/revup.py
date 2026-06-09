@@ -90,8 +90,21 @@ async def get_config() -> config.Config:
     # There's a chicken/egg problem in getting git path from config when we need git
     # to find the path of the config file. Just this once, we use the default.
     sh = shell.Shell()
-    repo_root = (await sh.sh(git.get_default_git(), "rev-parse", "--show-toplevel"))[1].rstrip()
-    conf = config.Config(config_path, os.path.join(repo_root, CONFIG_FILE_NAME))
+    rev_parse_out = (
+        await sh.sh(
+            git.get_default_git(),
+            "rev-parse",
+            "--path-format=absolute",
+            "--show-toplevel",
+            "--git-common-dir",
+        )
+    )[1].splitlines()
+    repo_root, git_dir = rev_parse_out[0].rstrip(), rev_parse_out[1].rstrip()
+    conf = config.Config(
+        config_path,
+        os.path.join(repo_root, CONFIG_FILE_NAME),
+        os.path.join(git_dir, CONFIG_FILE_NAME),
+    )
     conf.read()
     return conf
 
@@ -223,7 +236,9 @@ def build_parser() -> Tuple[RevupArgParser, List[RevupArgParser]]:
         all_parsers
     )
     config_parser.add_argument("value", nargs="?")
+    config_parser.add_argument("--global", "-g", action="store_true", dest="use_global")
     config_parser.add_argument("--repo", "-r", action="store_true")
+    config_parser.add_argument("--repo-local", "-l", action="store_true")
     config_parser.add_argument("--delete", "-d", action="store_true")
 
     toolkit_subparsers = toolkit_parser.add_subparsers(dest="toolkit_cmd", required=True)

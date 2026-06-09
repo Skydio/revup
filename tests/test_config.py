@@ -26,8 +26,17 @@ def make_parsers():
     return [revup_parser, upload_parser]
 
 
-def make_config_args(flag, value=None, repo=False, delete=False):
-    return argparse.Namespace(flag=[flag], value=value, repo=repo, delete=delete)
+def make_config_args(
+    flag, value=None, use_global=False, repo=False, repo_local=False, delete=False
+):
+    return argparse.Namespace(
+        flag=[flag],
+        value=value,
+        use_global=use_global,
+        repo=repo,
+        repo_local=repo_local,
+        delete=delete,
+    )
 
 
 class TestConfigSetAndRead:
@@ -108,10 +117,66 @@ class TestConfigSetAndRead:
             repo_conf.set_value("revup", "forge_url", "repo.github.com")
             repo_conf.write()
 
-            # Reading repo then user means user wins (ConfigParser last-read-wins)
             combined = Config(user_path, repo_config_path=repo_path)
             combined.read()
-            # repo is read first, then user overrides
+            assert combined.config.get("revup", "forge_url") == "repo.github.com"
+
+    def test_git_dir_config_overrides_repo_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            user_path = os.path.join(tmp, "user_config")
+            repo_path = os.path.join(tmp, "repo_config")
+            git_dir_path = os.path.join(tmp, "git_dir_config")
+
+            user_conf = Config(user_path)
+            user_conf.read()
+            user_conf.set_value("revup", "forge_url", "user.github.com")
+            user_conf.write()
+
+            repo_conf = Config(repo_path)
+            repo_conf.read()
+            repo_conf.set_value("revup", "forge_url", "repo.github.com")
+            repo_conf.write()
+
+            git_dir_conf = Config(git_dir_path)
+            git_dir_conf.read()
+            git_dir_conf.set_value("revup", "forge_url", "gitdir.github.com")
+            git_dir_conf.write()
+
+            combined = Config(
+                user_path,
+                repo_config_path=repo_path,
+                git_dir_config_path=git_dir_path,
+            )
+            combined.read()
+            assert combined.config.get("revup", "forge_url") == "gitdir.github.com"
+
+    def test_git_dir_config_falls_through_to_lower_layers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            user_path = os.path.join(tmp, "user_config")
+            repo_path = os.path.join(tmp, "repo_config")
+            git_dir_path = os.path.join(tmp, "git_dir_config")
+
+            user_conf = Config(user_path)
+            user_conf.read()
+            user_conf.set_value("revup", "forge_url", "user.github.com")
+            user_conf.set_value("upload", "remote_name", "user_remote")
+            user_conf.write()
+
+            repo_conf = Config(repo_path)
+            repo_conf.read()
+            repo_conf.set_value("upload", "remote_name", "repo_remote")
+            repo_conf.write()
+
+            # git_dir config file does not exist on disk
+            combined = Config(
+                user_path,
+                repo_config_path=repo_path,
+                git_dir_config_path=git_dir_path,
+            )
+            combined.read()
+            # repo overrides user
+            assert combined.config.get("upload", "remote_name") == "repo_remote"
+            # user value preserved when not overridden
             assert combined.config.get("revup", "forge_url") == "user.github.com"
 
 
@@ -261,6 +326,89 @@ class TestConfigMain:
             written = Config(path)
             written.read()
             assert written.config.get("revup", "forge_url") == "normalized.com"
+
+    def test_repo_local_writes_to_git_dir_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            user_path = os.path.join(tmp, "user_config")
+            repo_path = os.path.join(tmp, "repo_config")
+            git_dir_path = os.path.join(tmp, "git_dir_config")
+            conf = Config(user_path, repo_path, git_dir_path)
+            conf.read()
+            parsers = make_parsers()
+
+            args = make_config_args("forge_url", "local.github.com", repo_local=True)
+            ret = config_main(conf, args, parsers)
+
+            assert ret == 0
+            assert not os.path.exists(user_path)
+            assert not os.path.exists(repo_path)
+            written = Config(git_dir_path)
+            written.read()
+            assert written.config.get("revup", "forge_url") == "local.github.com"
+
+    def test_repo_local_with_repo_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            user_path = os.path.join(tmp, "user_config")
+            repo_path = os.path.join(tmp, "repo_config")
+            git_dir_path = os.path.join(tmp, "git_dir_config")
+            conf = Config(user_path, repo_path, git_dir_path)
+            conf.read()
+            parsers = make_parsers()
+
+            args = make_config_args("forge_url", "x.github.com", repo=True, repo_local=True)
+            with pytest.raises(RevupUsageException, match="Can only specify one"):
+                config_main(conf, args, parsers)
+
+    def test_global_with_repo_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            user_path = os.path.join(tmp, "user_config")
+            repo_path = os.path.join(tmp, "repo_config")
+            git_dir_path = os.path.join(tmp, "git_dir_config")
+            conf = Config(user_path, repo_path, git_dir_path)
+            conf.read()
+            parsers = make_parsers()
+
+            args = make_config_args("forge_url", "x.github.com", use_global=True, repo=True)
+            with pytest.raises(RevupUsageException, match="Can only specify one"):
+                config_main(conf, args, parsers)
+
+    def test_global_writes_to_user_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            user_path = os.path.join(tmp, "user_config")
+            repo_path = os.path.join(tmp, "repo_config")
+            git_dir_path = os.path.join(tmp, "git_dir_config")
+            conf = Config(user_path, repo_path, git_dir_path)
+            conf.read()
+            parsers = make_parsers()
+
+            args = make_config_args("forge_url", "global.github.com", use_global=True)
+            ret = config_main(conf, args, parsers)
+
+            assert ret == 0
+            assert not os.path.exists(repo_path)
+            assert not os.path.exists(git_dir_path)
+            written = Config(user_path)
+            written.read()
+            assert written.config.get("revup", "forge_url") == "global.github.com"
+
+    def test_repo_writes_to_repo_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            user_path = os.path.join(tmp, "user_config")
+            repo_path = os.path.join(tmp, "repo_config")
+            git_dir_path = os.path.join(tmp, "git_dir_config")
+            conf = Config(user_path, repo_path, git_dir_path)
+            conf.read()
+            parsers = make_parsers()
+
+            args = make_config_args("forge_url", "repo.github.com", repo=True)
+            ret = config_main(conf, args, parsers)
+
+            assert ret == 0
+            assert not os.path.exists(user_path)
+            assert not os.path.exists(git_dir_path)
+            written = Config(repo_path)
+            written.read()
+            assert written.config.get("revup", "forge_url") == "repo.github.com"
 
 
 class TestApplyToParsers:
