@@ -110,17 +110,28 @@ class Config:
     # Path to config file in current repo
     repo_config_path: str
 
+    # Path to config file inside the current repo's .git directory
+    git_dir_config_path: str
+
     # Whether the config contains values that need to be flushed to the file
     dirty: bool = False
 
-    def __init__(self, config_path: str, repo_config_path: str = ""):
+    def __init__(
+        self,
+        config_path: str,
+        repo_config_path: str = "",
+        git_dir_config_path: str = "",
+    ):
         self.config = configparser.ConfigParser()
         self.config_path = config_path
         self.repo_config_path = repo_config_path
+        self.git_dir_config_path = git_dir_config_path
         self.file_configs: List[Tuple[str, configparser.ConfigParser]] = []
 
     def read(self) -> None:
-        for path in (self.repo_config_path, self.config_path):
+        # Read in increasing precedence: later reads overwrite earlier ones.
+        # Precedence: .git/.revupconfig > repo/.revupconfig > ~/.revupconfig
+        for path in (self.config_path, self.repo_config_path, self.git_dir_config_path):
             if not path:
                 continue
             file_conf = configparser.ConfigParser()
@@ -218,7 +229,14 @@ def config_main(conf: Config, args: argparse.Namespace, all_parsers: List[RevupA
     else:
         value = getpass.getpass(f"Input value for {command}.{key}: ").strip()
 
-    config_path = conf.repo_config_path if args.repo else conf.config_path
+    if args.repo_local and args.repo:
+        raise RevupUsageException("Cannot specify both --repo and --repo-local")
+    if args.repo_local:
+        config_path = conf.git_dir_config_path
+    elif args.repo:
+        config_path = conf.repo_config_path
+    else:
+        config_path = conf.config_path
     this_config = Config(config_path)
     this_config.read()
 

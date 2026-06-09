@@ -9,15 +9,13 @@ revup config - Edit revup configuration files.
 # DESCRIPTION
 
 Revup stores some persistent configuration values in a python configparser
-compatible format. A repo specific configuration is read from the root of
-the current git repo in a ".revupconfig" file. A user configuration is read
-from REVUP_CONFIG_PATH if available, otherwise from the default path of
-~/.revupconfig. Any flag or argument to a revup command can
-be configured. Revup loads options in this order:
+compatible format. Any flag or argument to a revup command can be configured.
+Revup loads options in this order:
 
 - The program has built in defaults that are given in the manual.
-- Repo configs take precedence over the above.
-- User configs take precedence over the above.
+- User configs (~/.revupconfig) take precedence over the above. REVUP_CONFIG_PATH can override this path
+- Repo configs (.revupconfig at the repo root) take precedence over the above.
+- Git-dir configs (.git/.revupconfig) take precedence over the above.
 - Command line flags specified by the user take highest precedence.
 
 # OPTIONS
@@ -39,6 +37,11 @@ revup will warn if attempting to specify them directly.
 **--repo, -r**
 : If specified, configuration value will be written to the file in the current
 repo. Otherwise, value will apply globally.
+
+**--repo-local**
+: If specified, configuration value will be written to .revupconfig inside the
+current repo's .git directory. This file is not tracked by git, making it
+suitable for per-checkout overrides. Cannot be combined with --repo.
 
 **--delete, -d**
 : Delete the value with the given flag key.
