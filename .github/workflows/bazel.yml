@@ -1,0 +1,25 @@
+name: Bazel build
+
+on:
+  push:
+    branches: [ "*" ]
+  pull_request:
+    branches: [ "*" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    name: bazel build //:revup
+    steps:
+      - name: Install pandoc
+        run: sudo apt-get install -y pandoc
+      - uses: actions/checkout@v4
+        name: Checkout the repo
+      - uses: bazel-contrib/setup-bazel@0.9.1
+        name: Set up Bazel
+        with:
+          bazelisk-cache: true
+          disk-cache: ${{ github.workflow }}
+          repository-cache: true
+      - name: Build the revup wheel
+        run: bazel build //:revup

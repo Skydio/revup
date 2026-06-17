@@ -1,0 +1,13 @@
+{
+    "homepage": "https://github.com/skydio/revup",
+    "maintainers": [
+        {
+            "email": "jerry@skydio.com",
+            "github": "skydio",
+            "name": "Jerry Zhang"
+        }
+    ],
+    "repository": ["github:skydio/revup"],
+    "versions": [],
+    "yanked_versions": {}
+}

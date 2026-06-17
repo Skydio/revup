@@ -1,0 +1,197 @@
+load("@rules_license//rules:license.bzl", "license")
+load("@rules_python//python:defs.bzl", "py_library")
+load("@rules_python//python:packaging.bzl", "py_package", "py_wheel")
+load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
+load(":version.bzl", "REVUP_VERSION")
+
+package(default_applicable_licenses = [":license"])
+
+license(
+    name = "license",
+    package_name = "revup",
+    license_kinds = ["@rules_license//licenses/spdx:MIT"],
+    license_text = "LICENSE",
+)
+
+REVUP_DATE = "Apr 21, 2021"
+
+REVUP_VERSION_HASH = "main"
+
+# Man page sources, one per docs/*.md.
+MAN_PAGES = [
+    "amend",
+    "cherry-pick",
+    "config",
+    "restack",
+    "revup",
+    "upload",
+]
+
+# Driver script that takes (name, version, date, input.md, output.1.gz) and
+# emits the gzipped man page. Honors $M4 / $PANDOC env vars supplied below
+# so the action runs hermetically off the prebuilt rules_m4 / pandoc archives.
+sh_binary(
+    name = "build_manpage",
+    srcs = ["scripts/build_manpage.sh"],
+)
+
+# Per-platform config settings used to pick a pandoc binary.
+[
+    config_setting(
+        name = "is_{}_{}".format(os, cpu),
+        constraint_values = [
+            "@platforms//os:{}".format(os),
+            "@platforms//cpu:{}".format(cpu),
+        ],
+    )
+    for os, cpu in [
+        ("linux", "x86_64"),
+        ("linux", "arm64"),
+        ("macos", "x86_64"),
+        ("macos", "arm64"),
+        ("windows", "x86_64"),
+    ]
+]
+
+# Per-platform pandoc binary, fetched in MODULE.bazel.
+alias(
+    name = "pandoc",
+    actual = select({
+        ":is_linux_x86_64": "@pandoc_linux_amd64//:bin/pandoc",
+        ":is_linux_arm64": "@pandoc_linux_arm64//:bin/pandoc",
+        ":is_macos_x86_64": "@pandoc_macos_amd64//:bin/pandoc",
+        ":is_macos_arm64": "@pandoc_macos_arm64//:bin/pandoc",
+        ":is_windows_x86_64": "@pandoc_windows_amd64//:pandoc.exe",
+    }),
+)
+
+# Generate revup/man1/<name>.1.gz from docs/<name>.md. Uses a genrule (rather
+# than run_binary) so that the m4 make-variable from rules_m4's toolchain
+# expands correctly.
+[
+    genrule(
+        name = "man1_{}".format(page),
+        srcs = ["docs/{}.md".format(page)],
+        outs = ["revup/man1/{}.1.gz".format(page)],
+        cmd = (
+            "M4=$(M4) PANDOC=$(execpath :pandoc) " +
+            "$(execpath :build_manpage) " +
+            "{page} {version} '{date}' $(SRCS) $@"
+        ).format(
+            date = REVUP_DATE,
+            page = page,
+            version = REVUP_VERSION,
+        ),
+        tools = [
+            ":build_manpage",
+            ":pandoc",
+        ],
+        toolchains = ["@rules_m4//m4:current_m4_toolchain"],
+    )
+    for page in MAN_PAGES
+]
+
+filegroup(
+    name = "man1",
+    srcs = ["revup/man1/{}.1.gz".format(page) for page in MAN_PAGES],
+)
+
+# Rewrite docs/images/* links in README.md to absolute GitHub URLs, matching
+# the substitution that setup.py performs at sdist build time.
+genrule(
+    name = "long_description",
+    srcs = ["README.md"],
+    outs = ["README.pypi.md"],
+    cmd = """\
+python3 - "$<" "$@" <<'PY'
+import re, sys
+src, dst = sys.argv[1], sys.argv[2]
+text = open(src).read()
+text = re.sub(
+    r"<!--\\s*PYPI_REMOVE\\s*-->((?!PYPI_REMOVE).)*<!--\\s*/PYPI_REMOVE\\s*-->",
+    "",
+    text,
+    flags=re.MULTILINE | re.DOTALL,
+)
+text = text.replace(
+    "docs/images/",
+    "https://raw.githubusercontent.com/skydio/revup/{hash}/docs/images/",
+)
+open(dst, "w").write(text)
+PY
+""".format(hash = REVUP_VERSION_HASH),
+)
+
+py_library(
+    name = "revup_lib",
+    srcs = glob(["revup/**/*.py"]),
+    data = [":man1"],
+    imports = ["."],
+    visibility = ["//visibility:public"],
+)
+
+py_package(
+    name = "revup_pkg",
+    packages = ["revup"],
+    deps = [":revup_lib"],
+)
+
+py_wheel(
+    name = "revup",
+    abi = "none",
+    author = "Jerry Zhang",
+    author_email = "jerry@skydio.com",
+    classifiers = [
+        "License :: OSI Approved :: MIT License",
+        "Operating System :: OS Independent",
+        "Development Status :: 4 - Beta",
+        "Intended Audience :: Developers",
+        "Topic :: Software Development :: Libraries :: Python Modules",
+        "Topic :: Software Development :: Version Control",
+        "Topic :: Software Development :: Version Control :: Git",
+        "Programming Language :: Python",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
+        "Programming Language :: Python :: 3.14",
+        "Programming Language :: Python :: 3 :: Only",
+        "Environment :: Console",
+        "Typing :: Typed",
+    ],
+    description_content_type = "text/markdown",
+    description_file = ":long_description",
+    distribution = "revup",
+    entry_points = {
+        "console_scripts": ["revup = revup.__main__:_main"],
+    },
+    extra_distinfo_files = {
+        "//:LICENSE": "LICENSE",
+    },
+    homepage = "https://github.com/skydio/revup",
+    license = "MIT",
+    platform = "any",
+    project_urls = {
+        "Source": "https://github.com/skydio/revup",
+        "Bug Tracker": "https://github.com/skydio/revup/issues",
+    },
+    python_requires = ">=3.10",
+    python_tag = "py3",
+    requires = [
+        "aiohttp",
+        "argcomplete",
+        "async_lru",
+        "attrs",
+        "requests",
+        "rich",
+        "multidict",
+        "yarl",
+        "async_timeout",
+        "charset_normalizer",
+        "aiosignal",
+    ],
+    summary = "Revolutionary github tools. Effortlessly create multiple branches and pull requests.",
+    version = REVUP_VERSION,
+    visibility = ["//visibility:public"],
+    deps = [":revup_pkg"],
+)

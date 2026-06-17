@@ -2,3 +2,5 @@ build/
 revup.egg-info/
 revup/man1/
 __pycache__
+bazel-*
+MODULE.bazel.lock
