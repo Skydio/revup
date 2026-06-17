@@ -1,0 +1,5 @@
+{
+    "url": "https://github.com/skydio/revup/releases/download/v{VERSION}/revup-v{VERSION}.tar.gz",
+    "integrity": "**leave this alone**",
+    "strip_prefix": "revup-{VERSION}"
+}
