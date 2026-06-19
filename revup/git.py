@@ -5,7 +5,7 @@ import os
 import re
 import shutil
 import tempfile
-from typing import Any, Dict, List, Optional, Pattern, Tuple
+from typing import Any, Dict, List, Optional, Pattern, Tuple, cast
 
 from async_lru import alru_cache as lru_cache
 
@@ -151,6 +151,15 @@ async def make_git(
             ret = os.environ.get("GIT_EDITOR", os.environ.get("EDITOR", "nano"))
         return ret
 
+    async def get_gpg_sign() -> bool:
+        # commit-tree (plumbing) ignores commit.gpgSign, so read it and pass -S ourselves.
+        val = await git_ctx.git_stdout(
+            "config", "--type=bool", "--get", "commit.gpgSign", raiseonerror=False
+        )
+        return val.strip() == "true"
+
+    # asyncio.gather is only precisely typed up to 6 awaitables; beyond that
+    # mypy infers each result as object, so annotate the tuple ourselves.
     (
         repo_root,
         git_dir,
@@ -158,13 +167,18 @@ async def make_git(
         email,
         editor,
         main_exists,
-    ) = await asyncio.gather(
-        git_ctx.git_stdout("rev-parse", "--show-toplevel"),
-        git_ctx.git_stdout("rev-parse", "--path-format=absolute", "--git-dir"),
-        git_ctx.git_stdout("--version"),
-        get_email(),
-        get_editor(),
-        git_ctx.is_branch_or_commit(f"{remote_name}/{main_branch}"),
+        gpg_sign,
+    ) = cast(
+        Tuple[str, str, str, str, str, bool, bool],
+        await asyncio.gather(
+            git_ctx.git_stdout("rev-parse", "--show-toplevel"),
+            git_ctx.git_stdout("rev-parse", "--path-format=absolute", "--git-dir"),
+            git_ctx.git_stdout("--version"),
+            get_email(),
+            get_editor(),
+            git_ctx.is_branch_or_commit(f"{remote_name}/{main_branch}"),
+            get_gpg_sign(),
+        ),
     )
 
     if git_version:
@@ -184,6 +198,7 @@ async def make_git(
     git_ctx.email = email.lower()
     git_ctx.author = git_ctx.email.split("@")[0]
     git_ctx.editor = editor
+    git_ctx.gpg_sign = gpg_sign
     if not main_exists:
         if main_branch in COMMON_MAIN_BRANCHES:
             git_ctx.main_branch = COMMON_MAIN_BRANCHES[1 - COMMON_MAIN_BRANCHES.index(main_branch)]
@@ -225,6 +240,9 @@ class Git:
     author: str
     editor: str
 
+    # Whether to GPG/SSH sign commits revup creates, from git config commit.gpgSign
+    gpg_sign: bool
+
     def __init__(
         self,
         sh: shell.Shell,
@@ -239,6 +257,7 @@ class Git:
         self.remote_name = remote_name
         self.keep_temp = keep_temp
         self.main_branch = main_branch
+        self.gpg_sign = False
         self.base_branch_globs = base_branch_globs.strip().splitlines()
         self.temp_dir = tempfile.TemporaryDirectory(  # pylint: disable=consider-using-with
             prefix="revup_"
@@ -560,6 +579,8 @@ class Git:
             "-m",
             commit_info.commit_msg,
         ]
+        if self.gpg_sign:
+            commit_tree_args.append("-S")
         for p in commit_info.parents:
             commit_tree_args.extend(["-p", p])
         ret = await self.git_stdout(*commit_tree_args, env=git_env)
