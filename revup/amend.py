@@ -229,10 +229,13 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
     """
 
     async def get_has_unstaged() -> bool:
+        # Not converted to plumbing (diff-files/diff-index). This compares the
+        # worktree, where diff-index returns 1 on a stale mtime even with no content
+        # change, so it would report spurious unstaged changes.
         return args.all and await git_ctx.git_return_code("diff", "--no-renames", "--quiet") != 0
 
     has_staged, has_unstaged = await asyncio.gather(
-        git_ctx.git_return_code("diff", "--cached", "--no-renames", "--quiet"),
+        git_ctx.git_return_code("diff-index", "--cached", "--no-renames", "--quiet", "HEAD"),
         get_has_unstaged(),
     )
 
@@ -266,7 +269,7 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
 
     if args.last_touched:
         staged_files_output = await git_ctx.git_stdout(
-            "diff", "--cached", "--name-only", "--no-renames"
+            "diff-index", "--cached", "-r", "--name-only", "--no-renames", "HEAD"
         )
         if not staged_files_output:
             return 0
@@ -338,7 +341,7 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
             await get_topic_summary(topics) if args.parse_topics else "",
             stack[0].commit_msg,
             (
-                await git_ctx.git_stdout("--no-pager", "diff", "--cached", "--stat", "--no-color")
+                await git_ctx.git_stdout("diff-index", "--cached", "-r", "-M", "HEAD", "--stat")
                 if has_diff
                 else ""
             ),
@@ -346,7 +349,7 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
                 ""
                 if args.insert
                 else await git_ctx.git_stdout(
-                    "--no-pager", "diff", commit + "~", commit, "--stat", "--no-color"
+                    "diff-tree", "-r", "-M", commit + "~", commit, "--stat"
                 )
             ),
         )

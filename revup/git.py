@@ -525,9 +525,13 @@ class Git:
         ret = candidates[0]
         if len(candidates) == 1:
             return ret
-        current_branch = (await self.git("branch", "--show-current"))[1]
+        # symbolic-ref errors (rc != 0) on a detached HEAD; treat that as no branch.
+        ret_code, branch_out = await self.git(
+            "symbolic-ref", "-q", "--short", "HEAD", raiseonerror=False
+        )
+        current_branch = branch_out if ret_code == 0 else None
         for c in candidates:
-            if c == f"{self.remote_name}/{current_branch}":
+            if current_branch is not None and c == f"{self.remote_name}/{current_branch}":
                 ret = c
                 break
             elif c == f"{self.remote_name}/{self.main_branch}":
@@ -640,7 +644,9 @@ class Git:
         Return the summary of the diff (files and lines changed)
         """
         return (
-            await self.git_stdout("diff", "--shortstat", parent, commit, no_config=True)
+            await self.git_stdout(
+                "diff-tree", "-r", "-M", "--shortstat", parent, commit, no_config=True
+            )
         ).rstrip()
 
     async def merge_tree_commit(
@@ -689,7 +695,7 @@ class Git:
         """
         groups: List[List[int]] = []
         conflict_depth = 0
-        lines = (await self.git_stdout("show", f"{tree}:{path}")).split("\n")
+        lines = (await self.git_stdout("cat-file", "-p", f"{tree}:{path}")).split("\n")
         for lineno, line in enumerate(lines):
             if line.startswith("<" * 7):
                 if conflict_depth == 0:
