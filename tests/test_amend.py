@@ -645,6 +645,61 @@ class TestAmendTreePreservation:
             assert new_head != orig_head
 
 
+class TestAmendCommitterDate:
+    @async_test
+    async def test_amend_refreshes_committer_date_preserves_author(self):
+        async with GitTestEnvironment() as env:
+            await env.commit("root", {"root.txt": "r"})
+            # Epoch 0 so any refresh is strictly greater
+            await env.commit("first", {"a.txt": "a"}, committer_date="@0 +0000")
+            orig_author = await env.get_author_date()
+
+            await env.stage_file("a.txt", "modified")
+            args = make_amend_args(edit=False)
+            ret = await amend.main(args, env.git_ctx)
+
+            assert ret == 0
+            assert await env.get_author_date() == orig_author
+            assert int(await env.get_committer_date()) > 0
+
+    @async_test
+    async def test_amend_earlier_commit_refreshes_committer_date(self):
+        async with GitTestEnvironment() as env:
+            await env.commit("root", {"root.txt": "r"})
+            await env.commit("first", {"a.txt": "a"}, committer_date="@0 +0000")
+            await env.commit("second", {"b.txt": "b"})
+            orig_author = await env.get_author_date("HEAD~1")
+            top_committer = await env.get_committer_date("HEAD")
+
+            await env.stage_file("a.txt", "modified")
+            args = make_amend_args(ref_or_topic="HEAD~1", edit=False)
+            ret = await amend.main(args, env.git_ctx)
+
+            assert ret == 0
+            assert await env.get_author_date("HEAD~1") == orig_author
+            assert int(await env.get_committer_date("HEAD~1")) > 0
+            # Recreated commit keeps its date
+            assert await env.get_committer_date("HEAD") == top_committer
+
+    @async_test
+    async def test_last_touched_refreshes_committer_date(self):
+        async with GitTestEnvironment() as env:
+            await env.commit("root", {"root.txt": "r"})
+            await env.git_ctx.git("branch", "origin/main", "HEAD")
+            # Old but valid timestamp; the refresh must move committer date past it.
+            await env.commit(
+                "first\n\nTopic: alpha", {"a.txt": "v1"}, committer_date="@1000000000 +0000"
+            )
+            orig_author = await env.get_author_date("HEAD")
+
+            await env.stage_file("a.txt", "v2")
+            args = make_amend_args(last_touched=True, parse_topics=True)
+            await amend.main(args, env.git_ctx)
+
+            assert await env.get_author_date("HEAD") == orig_author
+            assert int(await env.get_committer_date("HEAD")) > 1000000000
+
+
 class TestAmendSingleCommit:
     @async_test
     async def test_amend_only_commit_above_root(self):

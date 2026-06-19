@@ -97,7 +97,7 @@ class GitTestEnvironment:
     async def read_file(self, name):
         return (self.tmp_dir / name).read_text()
 
-    async def commit(self, message, files=None):
+    async def commit(self, message, files=None, committer_date=None):
         if files:
             for name, content in files.items():
                 await self.write_file(name, content)
@@ -105,7 +105,7 @@ class GitTestEnvironment:
         ts = self._next_timestamp()
         env = {
             "GIT_AUTHOR_DATE": ts,
-            "GIT_COMMITTER_DATE": ts,
+            "GIT_COMMITTER_DATE": committer_date if committer_date is not None else ts,
         }
         await self.git_ctx.git("commit", "-m", message, "--allow-empty", env=env)
         self.commit_count += 1
@@ -120,6 +120,12 @@ class GitTestEnvironment:
 
     async def get_commit_hash(self, ref="HEAD"):
         return GitCommitHash(await self.git_ctx.git_stdout("rev-parse", ref))
+
+    async def get_author_date(self, ref="HEAD"):
+        return await self.git_ctx.git_stdout("log", "-1", "--format=%at", ref)
+
+    async def get_committer_date(self, ref="HEAD"):
+        return await self.git_ctx.git_stdout("log", "-1", "--format=%ct", ref)
 
     async def get_file_at_commit(self, name, ref="HEAD"):
         return await self.git_ctx.git_stdout("show", f"{ref}:{name}")

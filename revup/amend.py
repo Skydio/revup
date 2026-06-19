@@ -211,7 +211,8 @@ async def rebuild_stack_last_touched(
             amended.author_date = commit_obj.author_date
             amended.committer_name = commit_obj.committer_name
             amended.committer_email = commit_obj.committer_email
-            amended.committer_date = commit_obj.committer_date
+            # Refresh committer date, like git commit --amend.
+            amended.committer_date = ""
             amended.commit_msg = commit_obj.commit_msg
             new_commit = await git_ctx.commit_tree(amended)
         else:
@@ -318,6 +319,9 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
     )
     if len(stack) == 0:
         raise RevupUsageException(f"Couldn't find any commits between HEAD and {commit}~")
+
+    # Refresh the amended commit's committer date, like git commit --amend.
+    stack[0].committer_date = ""
 
     if args.insert:
         # Create a new empty commit after the given commit
