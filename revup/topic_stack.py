@@ -816,10 +816,12 @@ class TopicStack:
                 # Check rebase by applying each local commit onto the remote parent
                 # and comparing the resulting tree to the remote tree.
                 is_rebase = len(review.remote_commits) == len(topic.original_commits) and all(
-                    await asyncio.gather(*(
-                        self.git_ctx.commits_are_equivalent(local, remote)
-                        for local, remote in zip(topic.original_commits, review.remote_commits)
-                    ))
+                    await asyncio.gather(
+                        *(
+                            self.git_ctx.commits_are_equivalent(local, remote)
+                            for local, remote in zip(topic.original_commits, review.remote_commits)
+                        )
+                    )
                 )
                 # This review is a "complete rebase" iff all commit diffs and metadata match
                 review.is_pure_rebase = is_rebase and all(

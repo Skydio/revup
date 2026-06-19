@@ -173,9 +173,9 @@ class FakeForge(Forge):
             # baseRef must differ from current if specified
             if update.baseRef is not None:
                 assert update.baseRef, "baseRef cannot be empty string"
-                assert (
-                    update.baseRef != target_pr.headRef
-                ), f"cannot set baseRef to headRef ({update.baseRef})"
+                assert update.baseRef != target_pr.headRef, (
+                    f"cannot set baseRef to headRef ({update.baseRef})"
+                )
 
             # title cannot be empty if specified
             if update.title is not None:

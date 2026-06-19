@@ -128,5 +128,5 @@ async def forge_connection(
             await forge.close()
     else:
         raise RevupUsageException(
-            f'Unrecognized forge URL "{args.forge_url}". ' "Currently only GitHub is supported."
+            f'Unrecognized forge URL "{args.forge_url}". Currently only GitHub is supported.'
         )
