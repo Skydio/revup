@@ -8,6 +8,7 @@ import tempfile
 import pytest
 
 from revup.config import Config, RevupArgParser, collect_known_keys, config_main
+from revup.revup import repo_tool_config_from_git_dir
 from revup.types import RevupUsageException
 
 
@@ -294,3 +295,74 @@ class TestCollectKnownKeys:
         assert "forge_oauth" in known["revup"]
         assert "auto_topic" in known["upload"]
         assert "remote_name" in known["upload"]
+
+
+class TestRepoToolDetection:
+    def test_git_dir_under_repo_returns_checkout_root_config(self):
+        # .git is a symlink straight into .repo/projects.
+        git_dir = "/work/checkout/.repo/projects/foo/bar.git"
+        assert repo_tool_config_from_git_dir(git_dir) == "/work/checkout/.revupconfig"
+
+    def test_objects_under_project_objects_returns_checkout_root_config(self):
+        # .git is a dir of symlinks whose objects resolve into project-objects.
+        objects = "/work/checkout/.repo/project-objects/foo-bar.git/objects"
+        assert repo_tool_config_from_git_dir(objects) == "/work/checkout/.revupconfig"
+
+    def test_non_repo_git_dir_returns_none(self):
+        assert repo_tool_config_from_git_dir("/home/me/project/.git") is None
+
+    def test_repo_substring_in_name_is_not_matched(self):
+        # A directory merely containing the text ".repo" is not a path component.
+        assert repo_tool_config_from_git_dir("/home/me/my.repository/.git") is None
+
+
+def write_main_branch(path, main_branch):
+    conf = Config(path)
+    conf.read()
+    conf.set_value("revup", "main_branch", main_branch)
+    conf.write()
+
+
+class TestRepoToolConfigPrecedence:
+    def test_repo_config_overrides_repo_tool(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_path = os.path.join(tmp, "repo_config")
+            shared_path = os.path.join(tmp, "shared_config")
+            write_main_branch(repo_path, "repo-branch")
+            write_main_branch(shared_path, "shared-branch")
+
+            conf = Config("", repo_config_path=repo_path, repo_tool_config_path=shared_path)
+            conf.read()
+            assert conf.config.get("revup", "main_branch") == "repo-branch"
+
+    def test_repo_tool_used_when_repo_has_no_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_path = os.path.join(tmp, "repo_config")
+            shared_path = os.path.join(tmp, "shared_config")
+            write_main_branch(shared_path, "shared-branch")
+
+            conf = Config("", repo_config_path=repo_path, repo_tool_config_path=shared_path)
+            conf.read()
+            assert conf.config.get("revup", "main_branch") == "shared-branch"
+
+    def test_user_config_overrides_repo_and_repo_tool(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            user_path = os.path.join(tmp, "user_config")
+            repo_path = os.path.join(tmp, "repo_config")
+            shared_path = os.path.join(tmp, "shared_config")
+            write_main_branch(user_path, "user-branch")
+            write_main_branch(repo_path, "repo-branch")
+            write_main_branch(shared_path, "shared-branch")
+
+            conf = Config(user_path, repo_config_path=repo_path, repo_tool_config_path=shared_path)
+            conf.read()
+            assert conf.config.get("revup", "main_branch") == "user-branch"
+
+    def test_no_repo_tool_config_is_a_noop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_path = os.path.join(tmp, "repo_config")
+            write_main_branch(repo_path, "repo-branch")
+
+            conf = Config("", repo_config_path=repo_path, repo_tool_config_path=None)
+            conf.read()
+            assert conf.config.get("revup", "main_branch") == "repo-branch"

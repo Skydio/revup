@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import logging
 import os
 import stat
 import subprocess
 import sys
-from typing import Any, List, Tuple
+from typing import Any, List, Optional, Tuple
 
 import revup
 from revup import config, git, logs, shell
@@ -76,6 +77,44 @@ def get_config_path() -> str:
     )
 
 
+REPO_TOOL_DIR = ".repo"
+
+
+def repo_tool_config_from_git_dir(git_dir: str) -> Optional[str]:
+    """Given a resolved git directory path, return the shared config path if the
+    repo is part of a "repo" tool checkout, else None.
+
+    A repo project's git metadata lives under the checkout's .repo directory, so
+    a ".repo" path component means the directory just above it is the checkout
+    root, where a shared .revupconfig may live.
+    """
+    parts = os.path.normpath(git_dir).split(os.sep)
+    if REPO_TOOL_DIR not in parts:
+        return None
+    client_root = os.sep.join(parts[: parts.index(REPO_TOOL_DIR)])
+    return os.path.join(client_root, CONFIG_FILE_NAME)
+
+
+def repo_tool_config_from_git_results(rets: List[Tuple[int, str]]) -> Optional[str]:
+    """Pick the shared "repo" checkout config path out of git metadata queries.
+
+    We don't walk the filesystem (which could pick up an unrelated project's
+    config); instead we follow git's own metadata paths, which for a repo
+    project point into the checkout's .repo directory. Different versions of the
+    repo tool lay out .git differently (a single symlink to .repo/projects vs. a
+    directory of symlinks whose objects point into .repo/project-objects; this
+    changed in repo commit 2a089cfe, Dec 2021), so we check both the common git
+    dir and the objects path.
+    """
+    for ret in rets:
+        if ret[0] != 0:
+            continue
+        config_path = repo_tool_config_from_git_dir(os.path.realpath(ret[1].rstrip()))
+        if config_path:
+            return config_path
+    return None
+
+
 async def get_config() -> config.Config:
     config_path = get_config_path()
     if os.path.isfile(config_path) and hasattr(os, "getuid"):
@@ -90,8 +129,27 @@ async def get_config() -> config.Config:
     # There's a chicken/egg problem in getting git path from config when we need git
     # to find the path of the config file. Just this once, we use the default.
     sh = shell.Shell()
-    repo_root = (await sh.sh(git.get_default_git(), "rev-parse", "--show-toplevel"))[1].rstrip()
-    conf = config.Config(config_path, os.path.join(repo_root, CONFIG_FILE_NAME))
+    git_path = git.get_default_git()
+    toplevel, common_dir, objects_dir = await asyncio.gather(
+        sh.sh(git_path, "rev-parse", "--show-toplevel"),
+        sh.sh(
+            git_path, "rev-parse", "--path-format=absolute", "--git-common-dir", raiseonerror=False
+        ),
+        sh.sh(
+            git_path,
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-path",
+            "objects",
+            raiseonerror=False,
+        ),
+    )
+    repo_root = toplevel[1].rstrip()
+    conf = config.Config(
+        config_path,
+        os.path.join(repo_root, CONFIG_FILE_NAME),
+        repo_tool_config_from_git_results([common_dir, objects_dir]),
+    )
     conf.read()
     return conf
 
