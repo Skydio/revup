@@ -587,6 +587,28 @@ class Git:
         return GitCommitHash(ret)
 
     @lru_cache(maxsize=None)
+    async def empty_tree(self) -> GitTreeHash:
+        """
+        Return the hash of the empty tree, computed so it works under any hash algorithm.
+        """
+        return GitTreeHash(await self.git_stdout("mktree", input_str=""))
+
+    async def make_tree_from_index_entries(self, entries: List[str]) -> GitTreeHash:
+        """
+        Build a tree from raw `ls-files --stage` formatted index entries, without
+        touching the real index.
+        """
+        index_path = self.get_scratch_dir() + "/make_tree_index"
+        # Start from a fresh index; a reused file would accumulate entries.
+        if os.path.exists(index_path):
+            os.remove(index_path)
+        idx_env = {"GIT_INDEX_FILE": index_path}
+        await self.git(
+            "update-index", "--index-info", env=idx_env, input_str="\n".join(entries) + "\n"
+        )
+        return GitTreeHash(await self.git_stdout("write-tree", env=idx_env))
+
+    @lru_cache(maxsize=None)
     async def merge_tree(
         self,
         merge_base: GitCommitHash,
