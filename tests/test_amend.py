@@ -757,19 +757,23 @@ class TestAmendLastTouched:
         async with GitTestEnvironment() as env:
             await env.commit("root", {"root.txt": "r"})
             await env.git_ctx.git("branch", "origin/main", "HEAD")
+            # a.txt is touched by both "first" and "second"; the amend must land
+            # in "second" (the last to touch it), not "first".
             await env.commit("first\n\nTopic: alpha", {"a.txt": "v1"})
-            await env.commit("second\n\nTopic: beta", {"b.txt": "v1"})
+            await env.commit("second\n\nTopic: beta", {"a.txt": "v2", "b.txt": "v1"})
+            await env.commit("third\n\nTopic: gamma", {"c.txt": "v1"})
 
-            await env.stage_file("a.txt", "v2")
+            await env.stage_file("a.txt", "v3")
             args = make_amend_args(last_touched=True, parse_topics=True)
             await amend.main(args, env.git_ctx)
 
-            # a.txt should be amended into "first" (HEAD~1), not HEAD
-            content = await env.get_file_at_commit("a.txt", "HEAD~1")
-            assert content == "v2"
+            # a.txt should be amended into "second" (HEAD~1), not "first" (HEAD~2)
+            assert await env.get_file_at_commit("a.txt", "HEAD~2") == "v1"
+            assert await env.get_file_at_commit("a.txt", "HEAD~1") == "v3"
+            # ...and propagate forward to "third" (HEAD)
+            assert await env.get_file_at_commit("a.txt", "HEAD") == "v3"
             # b.txt should be unchanged
-            content_b = await env.get_file_at_commit("b.txt", "HEAD")
-            assert content_b == "v1"
+            assert await env.get_file_at_commit("b.txt", "HEAD") == "v1"
 
     @async_test
     async def test_multiple_files_to_different_commits(self):
@@ -789,6 +793,26 @@ class TestAmendLastTouched:
             assert await env.get_file_at_commit("a.txt", "HEAD~2") == "a2"
             assert await env.get_file_at_commit("b.txt", "HEAD~1") == "b2"
             assert await env.get_file_at_commit("c.txt", "HEAD") == "c2"
+
+    @async_test
+    async def test_amended_change_propagates_forward(self):
+        async with GitTestEnvironment() as env:
+            await env.commit("root", {"root.txt": "r"})
+            await env.git_ctx.git("branch", "origin/main", "HEAD")
+            # Nested path exercises the recursive mktree logic in
+            # make_tree_from_index_entries.
+            await env.commit("first\n\nTopic: alpha", {"sub/dir/a.txt": "v1"})
+            await env.commit("second\n\nTopic: beta", {"b.txt": "b1"})
+
+            # sub/dir/a.txt is amended into "first"; the new content must carry
+            # through to the rebuilt "second" as well, with no leftover staged change.
+            await env.stage_file("sub/dir/a.txt", "v2")
+            args = make_amend_args(last_touched=True, parse_topics=True)
+            await amend.main(args, env.git_ctx)
+
+            assert await env.get_file_at_commit("sub/dir/a.txt", "HEAD~1") == "v2"
+            assert await env.get_file_at_commit("sub/dir/a.txt", "HEAD") == "v2"
+            assert not await env.has_staged_changes()
 
     @async_test
     async def test_file_not_in_stack_remains_staged(self):
@@ -896,14 +920,20 @@ class TestAmendLastTouched:
         async with GitTestEnvironment() as env:
             await env.commit("root", {"root.txt": "r"})
             await env.git_ctx.git("branch", "origin/main", "HEAD")
-            await env.commit("first\n\nTopic: alpha", {"src/lib/a.txt": "a1"})
+            # Two sibling files in the same subdirectory land in the same commit,
+            # exercising a mktree subtree built from multiple entries.
+            await env.commit(
+                "first\n\nTopic: alpha", {"src/lib/a.txt": "a1", "src/lib/c.txt": "c1"}
+            )
             await env.commit("second\n\nTopic: beta", {"src/lib/b.txt": "b1"})
 
             await env.stage_file("src/lib/a.txt", "a2")
+            await env.stage_file("src/lib/c.txt", "c2")
             args = make_amend_args(last_touched=True, parse_topics=True)
             await amend.main(args, env.git_ctx)
 
             assert await env.get_file_at_commit("src/lib/a.txt", "HEAD~1") == "a2"
+            assert await env.get_file_at_commit("src/lib/c.txt", "HEAD~1") == "c2"
             assert await env.get_file_at_commit("src/lib/b.txt", "HEAD") == "b1"
 
     @async_test
