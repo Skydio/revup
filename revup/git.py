@@ -583,6 +583,45 @@ class Git:
         return GitCommitHash(ret)
 
     @lru_cache(maxsize=None)
+    async def empty_tree(self) -> GitTreeHash:
+        """
+        Return the hash of the empty tree, computed so it works under any hash algorithm.
+        """
+        return GitTreeHash(await self.git_stdout("mktree", input_str=""))
+
+    async def make_tree_from_index_entries(self, entries: List[str]) -> GitTreeHash:
+        """
+        Build a tree from raw `ls-files --stage` formatted index entries
+        (`<mode> <blob> <stage>\\t<path>`), without touching any index.
+
+        `git mktree` only builds a single tree level and rejects paths with
+        slashes, so nested paths are grouped by directory and the trees are
+        built bottom-up, writing one subtree object per directory.
+        """
+        # Nested dict: dir name -> subtree dict, plus "" -> list of blob lines
+        # for the files directly in that directory.
+        root: Dict[str, Any] = {}
+        for entry in entries:
+            meta, path = entry.split("\t", 1)
+            mode, blob, _stage = meta.split(" ")
+            *dirs, name = path.split("/")
+            node = root
+            for d in dirs:
+                node = node.setdefault(d, {})
+            node.setdefault("", []).append(f"{mode} blob {blob}\t{name}")
+
+        async def build(node: Dict[str, Any]) -> GitTreeHash:
+            lines = list(node.get("", []))
+            for name, child in node.items():
+                if name == "":
+                    continue
+                subtree = await build(child)
+                lines.append(f"040000 tree {subtree}\t{name}")
+            return GitTreeHash(await self.git_stdout("mktree", input_str="\n".join(lines) + "\n"))
+
+        return await build(root)
+
+    @lru_cache(maxsize=None)
     async def merge_tree(
         self,
         merge_base: GitCommitHash,
