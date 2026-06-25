@@ -1,6 +1,5 @@
 import asyncio
 import builtins
-import dataclasses
 import io
 import sys
 from unittest import mock

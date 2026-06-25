@@ -1343,7 +1343,7 @@ async def full_upload_pipeline(env, forge, push=False, stop_after=None, **kwargs
     Run the full upload pipeline via upload.run() generator.
     If stop_after is set to an UploadPhase, stops after that phase yields.
     """
-    from revup.upload import UploadPhase, run
+    from revup.upload import run
 
     env.git_ctx.clear_cache()
     args = make_forge_upload_args(**kwargs)
