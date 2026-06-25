@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import copy
 import logging
@@ -5,7 +7,7 @@ import os
 import re
 import shutil
 import tempfile
-from typing import Any, Dict, List, Optional, Pattern, Tuple, cast
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 from async_lru import alru_cache as lru_cache
 
@@ -45,7 +47,7 @@ COMMON_MAIN_BRANCHES = ["main", "master"]  # Below logic assumes 2 values here
 
 
 def parse_commit_header(raw_header: str) -> CommitHeader:
-    def _search_group(raw_header: str, regex: Pattern[str], group: str) -> str:
+    def _search_group(raw_header: str, regex: re.Pattern[str], group: str) -> str:
         m = regex.search(raw_header)
         assert m
         return m.group(group)
