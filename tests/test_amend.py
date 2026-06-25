@@ -791,6 +791,24 @@ class TestAmendLastTouched:
             assert await env.get_file_at_commit("c.txt", "HEAD") == "c2"
 
     @async_test
+    async def test_amended_change_propagates_forward(self):
+        async with GitTestEnvironment() as env:
+            await env.commit("root", {"root.txt": "r"})
+            await env.git_ctx.git("branch", "origin/main", "HEAD")
+            await env.commit("first\n\nTopic: alpha", {"a.txt": "v1"})
+            await env.commit("second\n\nTopic: beta", {"b.txt": "b1"})
+
+            # a.txt is amended into "first"; the new content must carry through
+            # to the rebuilt "second" as well, leaving no leftover staged change.
+            await env.stage_file("a.txt", "v2")
+            args = make_amend_args(last_touched=True, parse_topics=True)
+            await amend.main(args, env.git_ctx)
+
+            assert await env.get_file_at_commit("a.txt", "HEAD~1") == "v2"
+            assert await env.get_file_at_commit("a.txt", "HEAD") == "v2"
+            assert not await env.has_staged_changes()
+
+    @async_test
     async def test_file_not_in_stack_remains_staged(self):
         async with GitTestEnvironment() as env:
             await env.commit("root", {"root.txt": "r"})
