@@ -1144,8 +1144,8 @@ class TopicStack:
                 stdout=subprocess.STDOUT,
                 stderr=subprocess.STDOUT,
                 # Hide the remote output that says "Create a pull request for '' on GitHub"
-                output_transform=lambda l: (
-                    b"" if (l.startswith(b"remote: ") and self.git_ctx.sh.quiet) else l
+                output_transform=lambda line: (
+                    b"" if (line.startswith(b"remote: ") and self.git_ctx.sh.quiet) else line
                 ),
             )
 

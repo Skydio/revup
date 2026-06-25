@@ -12,12 +12,12 @@ deps:
 RUFF_CMD=$(PYTHON) -m ruff
 format:
 	$(RUFF_CMD) format .
-	$(RUFF_CMD) check --select I --fix .
+	$(RUFF_CMD) check --fix .
 
 # Check formatting using ruff
 check_format:
 	$(RUFF_CMD) format --check --diff .
-	$(RUFF_CMD) check --select I --diff .
+	$(RUFF_CMD) check --diff .
 
 MYPY_COMMAND=$(PYTHON) -m mypy --show-error-codes
 check_types:

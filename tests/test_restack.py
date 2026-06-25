@@ -1,4 +1,3 @@
-import pytest
 from git_env import GitTestEnvironment, async_test
 
 from revup.restack import restack

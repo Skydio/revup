@@ -3,5 +3,9 @@ line-length = 100
 target-version = "py38"
 extend-exclude = ["build", ".eggs"]
 
+[tool.ruff.lint]
+# Keep ruff's default rules (E, F) and also run import sorting (I).
+extend-select = ["I"]
+
 [tool.ruff.lint.isort]
 known-first-party = ["revup"]
