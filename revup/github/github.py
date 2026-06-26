@@ -11,7 +11,7 @@ from revup.forge import (
 )
 from revup.github.endpoint import GitHubEndpoint
 from revup.github.graphql import GraphqlQuery, QueryGroup
-from revup.types import RevupForgeException
+from revup.types import RevupForgeException, RevupRequestException
 
 PR_FRAGMENT = f"""
         fragment PrResult on PullRequestConnection {{
@@ -130,6 +130,14 @@ LABEL_FRAGMENT = """
             id
             name
         }"""
+
+
+def _is_resource_limit_error(e: Exception) -> bool:
+    if isinstance(e, RevupForgeException):
+        return "RESOURCE_LIMITS_EXCEEDED" in e.types
+    if isinstance(e, RevupRequestException):
+        return e.status in {502, 503}
+    return False
 
 
 def _make_pr_group(head_refs: List[str]) -> QueryGroup:
@@ -355,6 +363,41 @@ def _parse_teams(
     return teams_to_ids, teams_to_members
 
 
+async def _refresh_new_comment_ids(endpoint: GitHubEndpoint, prs: List[PrUpdate]) -> None:
+    """Re-query comments for PRs with new (id=None) comments to avoid duplicates on retry."""
+    prs_with_new = [pr for pr in prs if any(c.id is None for c in pr.comments)]
+    if not prs_with_new:
+        return
+
+    group = QueryGroup(
+        prefix="node",
+        scope="top",
+        field_template=(
+            "{}: node(id: {}) {{ ... on PullRequest {{ comments(first: "
+            + str(MAX_COMMENTS_TO_QUERY)
+            + ") {{ nodes {{ body id }} }} }} }},"
+        ),
+        var_types=["ID!"],
+    )
+    for pr in prs_with_new:
+        group.add(pr.id)
+
+    query = GraphqlQuery()
+    query.add_group(group)
+    query_str, variables = query.build()
+
+    result = await endpoint.graphql(query_str, max_retries=1, **variables)
+
+    raw = group.extract(result)
+    for pr, pr_data in zip(prs_with_new, raw):
+        existing = pr_data.get("comments", {}).get("nodes", []) if pr_data else []
+        existing_by_body = {c["body"]: c["id"] for c in existing}
+        for comment in pr.comments:
+            if comment.id is None and comment.text in existing_by_body:
+                comment.id = existing_by_body[comment.text]
+                logging.info("Comment already posted on PR, converting to edit")
+
+
 class Github(Forge):
     def __init__(
         self,
@@ -405,6 +448,23 @@ class Github(Forge):
 
         return q, pr_group, user_group, label_group, team_group
 
+    async def _execute_with_backoff(self, q: GraphqlQuery, max_retries: int = 3) -> Any:
+        query_str, variables = q.build()
+        try:
+            return await self.endpoint.graphql(query_str, max_retries=max_retries, **variables)
+        except (RevupForgeException, RevupRequestException) as e:
+            if not _is_resource_limit_error(e) or q.total_items() <= 1:
+                raise
+        left, right = q.split()
+        logging.warning(
+            "Request too complex ({} items), splitting into {} + {}".format(
+                q.total_items(), left.total_items(), right.total_items()
+            )
+        )
+        left_result = await self._execute_with_backoff(left, max_retries=max_retries)
+        right_result = await self._execute_with_backoff(right, max_retries=max_retries)
+        return _merge_results(left_result, right_result)
+
     async def query_everything(
         self,
         head_refs: List[str],
@@ -424,8 +484,7 @@ class Github(Forge):
             head_refs, user_ids, labels, teams
         )
 
-        query_str, variables = q.build()
-        result = await self.endpoint.graphql(query_str, **variables)
+        result = await self._execute_with_backoff(q)
 
         repo_id = result["data"]["repository"]["id"]
         prs = _parse_prs(pr_group, result, head_refs)
@@ -480,9 +539,8 @@ class Github(Forge):
 
         q = GraphqlQuery(operation="mutation")
         q.add_group(group)
-        query_str, variables = q.build()
 
-        pr_results = await self.endpoint.graphql(query_str, **variables)
+        pr_results = await self._execute_with_backoff(q)
         raw = group.extract(pr_results)
         for i, pr in enumerate(prs):
             result_node = raw[i]["pullRequest"]
@@ -494,15 +552,25 @@ class Github(Forge):
         q = self._build_update_mutation(prs)
         query_str, variables = q.build()
         try:
-            await self.endpoint.graphql(query_str, **variables)
-        except RevupForgeException as e:
-            if "timeout" in e.message:
+            await self.endpoint.graphql(query_str, max_retries=1, **variables)
+        except (RevupForgeException, RevupRequestException) as e:
+            if isinstance(e, RevupForgeException) and "timeout" in e.message:
                 logging.warning(
                     "Github update request timed out! Most likely this is a false alarm and changes"
                     " actually succeeded. You may want to rerun this command to verify."
                 )
-            else:
+                return
+            if not _is_resource_limit_error(e) or len(prs) <= 1:
                 raise
+            mid = len(prs) // 2
+            logging.warning(
+                "Update request too complex ({} PRs), splitting into {} + {}".format(
+                    len(prs), mid, len(prs) - mid
+                )
+            )
+            await _refresh_new_comment_ids(self.endpoint, prs)
+            await self.update_pull_requests(prs[:mid])
+            await self.update_pull_requests(prs[mid:])
 
     def _build_update_mutation(self, prs: List[PrUpdate]) -> GraphqlQuery:
         inputs = []
@@ -709,3 +777,17 @@ query ($owner: String!, $name: String!, $number: Int!) {
         )
         pr = result["data"]["repository"]["pullRequest"]
         return pr["headRefName"], pr["baseRefName"]
+
+
+def _merge_results(left: Any, right: Any) -> Any:
+    """Merge two GraphQL result dicts by combining their data keys."""
+    merged: Dict[str, Any] = {"data": {}}
+    if "data" in left:
+        merged["data"].update(left["data"])
+    if "data" in right:
+        for key, val in right["data"].items():
+            if key == "repository" and "repository" in merged["data"]:
+                merged["data"]["repository"].update(val)
+            else:
+                merged["data"][key] = val
+    return merged
