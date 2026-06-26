@@ -8,7 +8,6 @@ import subprocess
 import sys
 from typing import Any, List, Tuple
 
-import revup
 from revup import config, git, logs, shell
 from revup.completion import (
     ShellType,
@@ -21,6 +20,7 @@ from revup.config import RevupArgParser
 from revup.forge_utils import parse_forge_info
 from revup.topic_stack import PrBodySource
 from revup.types import RevupUsageException
+from revup.version import REVUP_VERSION
 
 REVUP_CONFIG_ENV_VAR = "REVUP_CONFIG_PATH"
 CONFIG_FILE_NAME = ".revupconfig"
@@ -47,9 +47,7 @@ class HelpAction(argparse.Action):
 def make_toplevel_parser() -> RevupArgParser:
     revup_parser = RevupArgParser(add_help=False, prog="revup")
     revup_parser.add_argument("--help", "-h", action=HelpAction, nargs=0)
-    revup_parser.add_argument(
-        "--version", action="version", version=f"%(prog)s {revup.__version__}"
-    )
+    revup_parser.add_argument("--version", action="version", version=f"%(prog)s {REVUP_VERSION}")
     revup_parser.add_argument("--proxy")
     revup_parser.add_argument("--forge-oauth", "--github-oauth")
     revup_parser.add_argument("--forge-url", "--github-url", default="github.com")
