@@ -13,7 +13,7 @@
 <p align="center">
 <a href="https://github.com/Skydio/revup"><img alt="Source Code" src="https://img.shields.io/badge/source-code-blue"/></a>
 <a href="https://github.com/Skydio/revup/issues"><img alt="Issues" src="https://img.shields.io/badge/issue-tracker-blue"/></a>
-<img alt="Python 3.8 | 3.9 | 3.10" src="https://img.shields.io/pypi/pyversions/revup"/>
+<img alt="Python 3.10 | 3.11 | 3.12 | 3.13 | 3.14" src="https://img.shields.io/pypi/pyversions/revup"/>
 <a href="https://pypi.org/project/revup/"><img alt="PyPI" src="https://img.shields.io/pypi/v/revup"/></a>
 <a href="https://github.com/Skydio/revup/tree/main/LICENSE"><img alt="MIT License" src="https://img.shields.io/pypi/l/revup"/></a>
 </p>
@@ -35,7 +35,7 @@ Revup provides command-line tools that allow developers to iterate faster on par
 
 # Compatibility
 
-Revup requires python 3.8 or higher and git 2.43 or higher. Revup works with Linux, OSX, and Windows (limited testing).
+Revup requires python 3.10 or higher and git 2.43 or higher. Revup works with Linux, OSX, and Windows (limited testing).
 
 Follow instructions [here](https://git-scm.com/downloads) to get the latest git version for your OS. Revup uses flags only present in newer git versions.
 
@@ -44,7 +44,7 @@ Follow instructions [here](https://git-scm.com/downloads) to get the latest git 
 Install with `pip` or your favorite package manager.
 
 ```sh
-python3.8 -m pip install revup
+python3 -m pip install revup
 ```
 
 Verify that installation was successful by showing the help page.
