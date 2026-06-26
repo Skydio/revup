@@ -190,33 +190,44 @@ async def rebuild_stack_last_touched(
         _, path = line.split("\t", 1)
         staged_entries[path] = line
 
-    tmp_index = git_ctx.get_scratch_dir() + "/last_touched_index"
-
     new_commit = GitCommitHash(stack[0].parents[0]) if stack[0].parents else GitCommitHash("")
     for i, commit_obj in enumerate(stack):
-        if i in commit_to_files:
-            idx_env = {"GIT_INDEX_FILE": tmp_index}
-            await git_ctx.git("read-tree", commit_obj.tree, env=idx_env)
-            update_lines = [staged_entries[f] for f in commit_to_files[i]]
-            await git_ctx.git(
-                "update-index",
-                "--index-info",
-                env=idx_env,
-                input_str="\n".join(update_lines) + "\n",
+        # Cherry-pick onto the rebuilt parent first, so amendments to earlier
+        # commits propagate forward through the rest of the stack.
+        rebuilt_parent = new_commit
+        new_commit = await replay_cherry_pick(git_ctx, commit_obj, new_commit)
+        if i not in commit_to_files:
+            continue
+
+        # Build a tree of just this commit's staged files and merge it onto the
+        # cherry-picked commit, taking the staged version on conflict.
+        overlay = await git_ctx.make_tree_from_index_entries(
+            [staged_entries[f] for f in commit_to_files[i]]
+        )
+        amended = CommitHeader(GitTreeHash(""), [rebuilt_parent])
+        amended.author_name = commit_obj.author_name
+        amended.author_email = commit_obj.author_email
+        amended.author_date = commit_obj.author_date
+        amended.committer_name = commit_obj.committer_name
+        amended.committer_email = commit_obj.committer_email
+        # Refresh committer date, like git commit --amend.
+        amended.committer_date = ""
+        amended.commit_msg = commit_obj.commit_msg
+        try:
+            new_commit = await git_ctx.merge_tree_commit(
+                new_commit,
+                GitCommitHash(overlay),
+                amended,
+                GitCommitHash(await git_ctx.empty_tree()),
+                "theirs",
             )
-            new_tree = GitTreeHash(await git_ctx.git_stdout("write-tree", env=idx_env))
-            amended = CommitHeader(new_tree, [new_commit])
-            amended.author_name = commit_obj.author_name
-            amended.author_email = commit_obj.author_email
-            amended.author_date = commit_obj.author_date
-            amended.committer_name = commit_obj.committer_name
-            amended.committer_email = commit_obj.committer_email
-            # Refresh committer date, like git commit --amend.
-            amended.committer_date = ""
-            amended.commit_msg = commit_obj.commit_msg
-            new_commit = await git_ctx.commit_tree(amended)
-        else:
-            new_commit = await replay_cherry_pick(git_ctx, commit_obj, new_commit)
+        except GitConflictException as exc:
+            await git_ctx.dump_conflict(exc)
+            raise RevupConflictException(
+                commit_obj,
+                new_commit,
+                "You may need to `git rebase -i` to resolve these conflicts!",
+            ) from exc
 
     return new_commit
 
