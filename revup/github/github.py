@@ -12,6 +12,15 @@ from revup.forge import (
 from revup.github.endpoint import GitHubEndpoint
 from revup.types import RevupForgeException
 
+# Github rejects graphql requests that are too large or expensive with errors like
+# "Resource limits for this query exceeded" or "Timeout on validation of query", so
+# batch the per-pr lookups instead of aliasing them all in a single request.
+MAX_HEAD_REFS_PER_QUERY = 10
+
+# Mutations carry the full PR bodies and comments, which themselves grow with the size
+# of the relative chain, so use a smaller batch size than for queries.
+MAX_PRS_PER_MUTATION = 5
+
 
 def _get_args_dict(args: List[Any], prefix: str) -> Dict[str, Any]:
     return {f"{prefix}{n}": arg for n, arg in enumerate(args)}
@@ -65,6 +74,49 @@ class Github(Forge):
         await self.endpoint.close()
 
     async def query_everything(
+        self,
+        head_refs: List[str],
+        user_ids: List[str],
+        labels: List[str],
+        teams: List[Tuple[str, str]],
+    ) -> Tuple[
+        str,
+        List[Optional[PrInfo]],
+        Dict[str, str],
+        Dict[str, str],
+        Dict[str, str],
+        Dict[str, str],
+        Dict[str, Optional[Set[str]]],
+    ]:
+        # Batch the head ref lookups so a large topic stack doesn't exceed github's
+        # graphql resource limits, then merge the results in order.
+        (
+            repo_id,
+            prs,
+            names_to_ids,
+            names_to_logins,
+            labels_to_ids,
+            teams_to_ids,
+            teams_to_members,
+        ) = await self._query_everything_impl(
+            head_refs[:MAX_HEAD_REFS_PER_QUERY], user_ids, labels, teams
+        )
+        for start in range(MAX_HEAD_REFS_PER_QUERY, len(head_refs), MAX_HEAD_REFS_PER_QUERY):
+            _, chunk_prs, _, _, _, _, _ = await self._query_everything_impl(
+                head_refs[start : start + MAX_HEAD_REFS_PER_QUERY], [], [], []
+            )
+            prs.extend(chunk_prs)
+        return (
+            repo_id,
+            prs,
+            names_to_ids,
+            names_to_logins,
+            labels_to_ids,
+            teams_to_ids,
+            teams_to_members,
+        )
+
+    async def _query_everything_impl(
         self,
         head_refs: List[str],
         user_ids: List[str],
@@ -435,6 +487,12 @@ class Github(Forge):
         )
 
     async def create_pull_requests(self, repo_id: str, prs: List[PrInfo]) -> None:
+        for start in range(0, len(prs), MAX_PRS_PER_MUTATION):
+            await self._create_pull_requests_impl(
+                repo_id, prs[start : start + MAX_PRS_PER_MUTATION]
+            )
+
+    async def _create_pull_requests_impl(self, repo_id: str, prs: List[PrInfo]) -> None:
         inputs = []
         for pr in prs:
             headRef = (
@@ -486,6 +544,10 @@ class Github(Forge):
                 pr.url = result["url"]
 
     async def update_pull_requests(self, prs: List[PrUpdate]) -> None:
+        for start in range(0, len(prs), MAX_PRS_PER_MUTATION):
+            await self._update_pull_requests_impl(prs[start : start + MAX_PRS_PER_MUTATION])
+
+    async def _update_pull_requests_impl(self, prs: List[PrUpdate]) -> None:
         inputs = []
         labels = []
         reviewers = []
