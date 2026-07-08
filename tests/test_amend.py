@@ -1,4 +1,5 @@
 import argparse
+from pathlib import Path
 
 import pytest
 from git_env import (
@@ -536,6 +537,40 @@ class TestAmendConflict:
 
             with pytest.raises(RevupConflictException):
                 await amend.main(args, env.git_ctx)
+
+    @async_test
+    async def test_conflict_preserves_amended_message(self):
+        async with GitTestEnvironment() as env:
+            await env.commit("root", {"root.txt": "r"})
+            await env.commit("first", {"a.txt": "line1\nline2\nline3\n"})
+            await env.commit("second", {"a.txt": "line1\nchanged_by_second\nline3\n"})
+
+            await env.stage_file("a.txt", "line1\nconflicting_change\nline3\n")
+            env.git_ctx.editor = make_editor_script(env.tmp_dir, "my nice amended message")
+            args = make_amend_args(ref_or_topic="HEAD~1", edit=True)
+
+            with pytest.raises(RevupConflictException):
+                await amend.main(args, env.git_ctx)
+
+            msg_path = f"{env.git_ctx.get_scratch_dir()}/{amend.AMENDED_COMMIT_MSG}"
+            assert Path(msg_path).read_text(encoding="utf-8") == "my nice amended message"
+
+    @async_test
+    async def test_conflict_does_not_save_unchanged_message(self):
+        async with GitTestEnvironment() as env:
+            await env.commit("root", {"root.txt": "r"})
+            await env.commit("first", {"a.txt": "line1\nline2\nline3\n"})
+            await env.commit("second", {"a.txt": "line1\nchanged_by_second\nline3\n"})
+
+            await env.stage_file("a.txt", "line1\nconflicting_change\nline3\n")
+            env.git_ctx.editor = make_passthrough_editor_script(env.tmp_dir)
+            args = make_amend_args(ref_or_topic="HEAD~1", edit=True)
+
+            with pytest.raises(RevupConflictException):
+                await amend.main(args, env.git_ctx)
+
+            msg_path = Path(env.git_ctx.get_scratch_dir()) / amend.AMENDED_COMMIT_MSG
+            assert not msg_path.exists()
 
 
 class TestAmendMultipleFiles:

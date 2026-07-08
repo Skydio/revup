@@ -24,6 +24,7 @@ CLEANUP_SCISSOR_COMMENT = """Do not modify or remove the line above.
 Everything below it will be ignored."""
 CLEANUP_STRIP_COMMENT = """Please enter the commit message for your changes. Lines starting
 with '{}' will be ignored, and an empty message aborts the amend."""
+AMENDED_COMMIT_MSG = "AMENDED_COMMIT_MSG"
 
 
 async def invoke_editor_for_commit_msg(
@@ -137,13 +138,29 @@ async def parse_ref_or_topic(
         raise RevupUsageException("Can't have both --no-parse-refs and --no-parse-topics!")
 
 
+def preserve_amended_commit_msg(git_ctx: git.Git, original_msg: str, amended_msg: str) -> None:
+    if amended_msg == original_msg:
+        return
+
+    path = f"{git_ctx.get_scratch_dir()}/{AMENDED_COMMIT_MSG}"
+    with open(path, mode="w", encoding="utf-8") as msg_file:
+        msg_file.write(amended_msg)
+    logging.error(f"Your amended commit message was saved to: {path}")
+
+
 async def replay_cherry_pick(
-    git_ctx: git.Git, commit_obj: CommitHeader, new_parent: GitCommitHash
+    git_ctx: git.Git,
+    commit_obj: CommitHeader,
+    new_parent: GitCommitHash,
+    *,
+    original_commit_msg: str = "",
+    amended_commit_msg: str = "",
 ) -> GitCommitHash:
     try:
         return await git_ctx.synthetic_cherry_pick_from_commit(commit_obj, new_parent)
     except GitConflictException as exc:
         await git_ctx.dump_conflict(exc)
+        preserve_amended_commit_msg(git_ctx, original_commit_msg, amended_commit_msg)
         raise RevupConflictException(
             commit_obj,
             new_parent,
@@ -326,6 +343,9 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
     # Refresh the amended commit's committer date, like git commit --amend.
     stack[0].committer_date = ""
 
+    original_commit_msg = stack[0].commit_msg
+    amended_commit_msg = original_commit_msg
+
     if args.insert:
         # Create a new empty commit after the given commit
         stack[0].parents = [stack[0].commit_id]
@@ -365,6 +385,7 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
             return 0
 
         stack[0].commit_msg = new_msg
+        amended_commit_msg = new_msg
 
     if has_diff:
         new_commit = stack[0].parents[0]
@@ -386,6 +407,7 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
                     new_commit = await git_ctx.synthetic_amend(commit_obj, temp_commit)
                 except GitConflictException as exc:
                     await git_ctx.dump_conflict(exc)
+                    preserve_amended_commit_msg(git_ctx, original_commit_msg, amended_commit_msg)
                     raise RevupConflictException(
                         temp_commit,
                         commit_obj.commit_id,
@@ -398,7 +420,13 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
                     # don't actually have to apply a patch.
                     new_commit = await git_ctx.cherry_pick_from_tree(commit_obj, new_commit)
                 else:
-                    new_commit = await replay_cherry_pick(git_ctx, commit_obj, new_commit)
+                    new_commit = await replay_cherry_pick(
+                        git_ctx,
+                        commit_obj,
+                        new_commit,
+                        original_commit_msg=original_commit_msg,
+                        amended_commit_msg=amended_commit_msg,
+                    )
     else:
         # If there's no diff (only text changed), its much faster to use the same trees
         new_commit = stack[0].parents[0]
