@@ -186,6 +186,21 @@ class TestUploadLimitTopics:
             review = topics.topics["alpha"].reviews["origin/main"]
             assert len(review.new_commits) == 1
 
+    @async_test
+    async def test_limit_topics_pulls_in_relative_dependencies(self):
+        """Uploading an explicit topic includes its relative dependency chain (#265)."""
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            await env.commit("base\n\nTopic: base", {"a.txt": "a"})
+            await env.commit("child\n\nTopic: child\nRelative: base", {"b.txt": "b"})
+            await env.commit("other\n\nTopic: other", {"c.txt": "c"})
+
+            topics = await run_upload_pipeline(env, topics=["child"])
+
+            assert "base" in topics.topics
+            assert "child" in topics.topics
+            assert "other" not in topics.topics
+
 
 class TestUploadRelativeTopics:
     @async_test

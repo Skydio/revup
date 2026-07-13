@@ -500,11 +500,30 @@ class TopicStack:
         Populate reviews for already-parsed topics. Verify base branch and relative topic info to
         ensure it is valid.
         """
+        effective_limit: Optional[Set[str]] = None
+        if limit_topics:
+            effective_limit = set(limit_topics)
+            for name in limit_topics:
+                if name not in self.topics:
+                    continue
+                to_visit = [name]
+                while to_visit:
+                    cur_name = to_visit.pop()
+                    topic = self.topics.get(cur_name)
+                    if topic is None or not topic.tags[TAG_RELATIVE]:
+                        continue
+                    relative_name = min(topic.tags[TAG_RELATIVE])
+                    if relative_name not in self.topics:
+                        continue
+                    if relative_name not in effective_limit:
+                        effective_limit.add(relative_name)
+                        to_visit.append(relative_name)
+
         last_topic = None
         # Copy topics before iterating so it's safe to delete from the original dict
         for name, topic in list(self.topics.items()):
-            if limit_topics:
-                if name not in limit_topics:
+            if effective_limit is not None:
+                if name not in effective_limit:
                     # If an explicit list was specified, don't upload other topics
                     del self.topics[name]
                     continue
