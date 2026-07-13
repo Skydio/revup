@@ -1,4 +1,5 @@
 import argparse
+from pathlib import Path
 
 import pytest
 from git_env import (
@@ -25,6 +26,7 @@ def make_amend_args(**kwargs):
         "relative_branch": None,
         "parse_topics": False,
         "parse_refs": True,
+        "run_hooks": False,
     }
     defaults.update(kwargs)
     return argparse.Namespace(**defaults)
@@ -536,6 +538,28 @@ class TestAmendConflict:
 
             with pytest.raises(RevupConflictException):
                 await amend.main(args, env.git_ctx)
+
+
+class TestAmendRunHooks:
+    @async_test
+    async def test_run_hooks_invokes_post_rewrite(self):
+        async with GitTestEnvironment() as env:
+            await env.commit("root", {"root.txt": "r"})
+            await env.commit("first", {"a.txt": "a"})
+
+            hook_dir = Path(env.git_ctx.git_dir) / "hooks"
+            hook_dir.mkdir(exist_ok=True)
+            marker = env.tmp_dir / "hook_ran.txt"
+            hook = hook_dir / "post-rewrite"
+            hook.write_text(f'#!/bin/sh\necho "$1" > "{marker}"\n')
+            hook.chmod(0o755)
+
+            await env.stage_file("a.txt", "modified")
+            args = make_amend_args(edit=False, run_hooks=True)
+            ret = await amend.main(args, env.git_ctx)
+
+            assert ret == 0
+            assert marker.read_text().strip() == "amend"
 
 
 class TestAmendMultipleFiles:

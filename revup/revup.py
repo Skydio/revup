@@ -229,6 +229,11 @@ def build_parser() -> Tuple[RevupArgParser, List[RevupArgParser]]:
 
     amend_parser.add_argument("--parse-topics", default=True, action="store_true")
     amend_parser.add_argument("--parse-refs", default=True, action="store_true")
+    amend_parser.add_argument(
+        "--run-hooks",
+        action="store_true",
+        help="Run git post-rewrite hook after rewriting history",
+    )
 
     cherry_pick_parser.add_argument("--help", "-h", action=HelpAction, nargs=0)
     cherry_pick_parser.add_argument("branch_or_pr_url", nargs=1)

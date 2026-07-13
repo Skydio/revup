@@ -293,7 +293,10 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
         if not new_commit:
             return 0
 
+        old_head = GitCommitHash(await git_ctx.git_stdout("rev-parse", "HEAD"))
         await git_ctx.soft_reset(new_commit, {"GIT_REFLOG_ACTION": "revup amend --last-touched"})
+        if args.run_hooks and old_head != new_commit:
+            await git_ctx.run_post_rewrite_hook("amend", old_head, new_commit)
         return 0
 
     if args.ref_or_topic:
@@ -413,5 +416,8 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
     git_env = {
         "GIT_REFLOG_ACTION": reflog_action_str,
     }
+    old_head = GitCommitHash(await git_ctx.git_stdout("rev-parse", "HEAD"))
     await git_ctx.soft_reset(new_commit, git_env)
+    if args.run_hooks and old_head != new_commit:
+        await git_ctx.run_post_rewrite_hook("amend", old_head, new_commit)
     return 0

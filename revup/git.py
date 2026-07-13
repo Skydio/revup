@@ -586,6 +586,28 @@ class Git:
         ret = await self.git_stdout(*commit_tree_args, env=git_env)
         return GitCommitHash(ret)
 
+    async def run_post_rewrite_hook(
+        self, command: str, old_commit: GitCommitHash, new_commit: GitCommitHash
+    ) -> int:
+        """
+        Invoke the post-rewrite hook the same way git would after amend/rebase (#42).
+        """
+        stdin_path = f"{self.get_scratch_dir()}/post-rewrite-in"
+        os.makedirs(self.get_scratch_dir(), exist_ok=True)
+        with open(stdin_path, mode="w", encoding="utf-8") as hook_input:
+            hook_input.write(f"{old_commit} {new_commit}\n")
+        ret, _ = await self.git(
+            "hook",
+            "run",
+            "--ignore-missing",
+            f"--to-stdin={stdin_path}",
+            "post-rewrite",
+            "--",
+            command,
+            raiseonerror=False,
+        )
+        return ret
+
     @lru_cache(maxsize=None)
     async def merge_tree(
         self,
