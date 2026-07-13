@@ -915,29 +915,47 @@ class TopicStack:
                     review.status = PrStatus.NEW
 
             if review.push_status == PushStatus.PUSHED:
-                # If this change must be pushed, then all changes it depends on cannot be
-                # skipped due to rebase (although can be due to nochange), otherwise the
-                # forge will show the wrong commit diff between the two reviews
-                cur_topic = topic.relative_topic
-                while cur_topic is not None:
-                    cur_review = cur_topic.reviews[base_branch]
-                    if cur_review.push_status == PushStatus.REBASE:
-                        cur_review.push_status = PushStatus.PUSHED
-                        if cur_review.status == PrStatus.MERGED:
-                            # User has changed the base of an already merged commit, but hasn't
-                            # moved forward enough such that the commit would be dropped. There
-                            # isn't any way for us to handle this that wouldn't potentially
-                            # generate a conflict or show the incorrect commit diff. We settle
-                            # with showing the wrong diff and warning the user.
-                            # This should be relatively uncommon
-                            logging.warning(
-                                f"Attempted to rebase an already merged PR {cur_topic.name}"
-                            )
-                            logging.warning("'git pull' and upload again to fix this.")
+                self._propagate_pushed_through_graph(topic, base_branch)
 
-                        cur_topic = cur_topic.relative_topic
-                    else:
-                        break
+    def _promote_rebase_to_pushed(self, review: Review, topic_name: str) -> None:
+        if review.push_status != PushStatus.REBASE:
+            return
+        review.push_status = PushStatus.PUSHED
+        if review.status == PrStatus.MERGED:
+            logging.warning(f"Attempted to rebase an already merged PR {topic_name}")
+            logging.warning("'git pull' and upload again to fix this.")
+
+    def _propagate_pushed_through_graph(self, topic: Topic, base_branch: str) -> None:
+        """
+        If this change must be pushed, dependent topics cannot stay REBASE-only skips.
+        Walk ancestors via relative_topic and descendants via review.children (#163).
+        """
+        review = topic.reviews[base_branch]
+        if review.push_status != PushStatus.PUSHED:
+            return
+
+        stack: List[Review] = [review]
+        cur_topic = topic.relative_topic
+        while cur_topic is not None:
+            cur_review = cur_topic.reviews[base_branch]
+            self._promote_rebase_to_pushed(cur_review, cur_topic.name)
+            stack.append(cur_review)
+            cur_topic = cur_topic.relative_topic
+
+        visited: Set[int] = set()
+        while stack:
+            cur_review = stack.pop()
+            review_id = id(cur_review)
+            if review_id in visited:
+                continue
+            visited.add(review_id)
+            for child_review in cur_review.children:
+                if child_review.push_status == PushStatus.REBASE:
+                    child_review.push_status = PushStatus.PUSHED
+                    if child_review.status == PrStatus.MERGED:
+                        logging.warning("Attempted to rebase an already merged PR")
+                        logging.warning("'git pull' and upload again to fix this.")
+                stack.append(child_review)
 
     async def create_commits(self, trim_tags: bool, skip_empty_first_commit: bool = False) -> None:
         """

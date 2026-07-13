@@ -15,6 +15,8 @@ from revup.topic_stack import (
     format_remote_branch,
 )
 from revup.types import RevupConflictException, RevupUsageException
+from test_amend import make_amend_args
+from revup import amend as revup_amend
 
 
 def make_upload_args(**kwargs):
@@ -1146,6 +1148,76 @@ class TestRebaseDetection:
             assert c_review.push_status == PushStatus.PUSHED
             # Parent would normally be REBASE, but child forces it to PUSHED
             assert p_review.push_status == PushStatus.PUSHED
+
+    @async_test
+    async def test_rebase_pushed_propagates_to_sibling_children(self):
+        """When one child forces a push, sibling children of the parent are also pushed (#163)."""
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            root = await env.get_commit_hash()
+            await env.commit("parent\n\nTopic: parent", {"p.txt": "p"})
+            await env.commit("child_a\n\nTopic: child_a\nRelative: parent", {"a.txt": "a"})
+            await env.commit("child_b\n\nTopic: child_b\nRelative: parent", {"b.txt": "b"})
+
+            first = await run_upload_pipeline(env)
+            parent_review = first.topics["parent"].reviews["origin/main"]
+            child_a_review = first.topics["child_a"].reviews["origin/main"]
+            child_b_review = first.topics["child_b"].reviews["origin/main"]
+            parent_remote_head = parent_review.new_commits[-1]
+            parent_remote_base = parent_review.base_ref
+            child_a_remote_head = child_a_review.new_commits[-1]
+            child_a_remote_base = child_a_review.base_ref
+            child_b_remote_head = child_b_review.new_commits[-1]
+            child_b_remote_base = child_b_review.base_ref
+
+            await env.git_ctx.git("checkout", root)
+            await env.commit("upstream", {"u.txt": "u"})
+            new_main = await env.get_commit_hash()
+            await env.git_ctx.git("branch", "origin/main", new_main, "-f")
+            await env.git_ctx.git("checkout", "main")
+            await env.git_ctx.git("rebase", "origin/main")
+            await env.stage_file("a.txt", "a2")
+            args = make_amend_args(ref_or_topic="HEAD~1", edit=False)
+            await revup_amend.main(args, env.git_ctx)
+
+            topics = await run_upload_pipeline(env)
+            p_review = topics.topics["parent"].reviews["origin/main"]
+            a_review = topics.topics["child_a"].reviews["origin/main"]
+            b_review = topics.topics["child_b"].reviews["origin/main"]
+
+            p_review.pr_info = PrInfo(
+                baseRef="main",
+                headRef=p_review.remote_head,
+                baseRefOid=parent_remote_base,
+                headRefOid=parent_remote_head,
+                body="",
+                title="",
+                state="OPEN",
+            )
+            a_review.pr_info = PrInfo(
+                baseRef=p_review.remote_head,
+                headRef=a_review.remote_head,
+                baseRefOid=child_a_remote_base,
+                headRefOid=child_a_remote_head,
+                body="",
+                title="",
+                state="OPEN",
+            )
+            b_review.pr_info = PrInfo(
+                baseRef=p_review.remote_head,
+                headRef=b_review.remote_head,
+                baseRefOid=child_b_remote_base,
+                headRefOid=child_b_remote_head,
+                body="",
+                title="",
+                state="OPEN",
+            )
+
+            await topics.mark_rebases(skip_rebase=True)
+
+            assert a_review.push_status == PushStatus.PUSHED
+            assert p_review.push_status == PushStatus.PUSHED
+            assert b_review.push_status == PushStatus.PUSHED
 
     @async_test
     async def test_multi_commit_topic_partial_change_is_not_rebase(self):
