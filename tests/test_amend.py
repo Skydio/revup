@@ -537,6 +537,26 @@ class TestAmendConflict:
             with pytest.raises(RevupConflictException):
                 await amend.main(args, env.git_ctx)
 
+    @async_test
+    async def test_conflict_in_non_utf8_file_raises_cleanly(self):
+        # Dumping a conflict reads the conflicted file's content, which may not be
+        # valid UTF-8. This must raise RevupConflictException, not UnicodeDecodeError.
+        async with GitTestEnvironment() as env:
+            await env.commit("root", {"root.txt": "r"})
+            (env.tmp_dir / "bin.dat").write_bytes(b"\xff\xfe line1\nline2\nline3\n")
+            await env.git_ctx.git("add", "bin.dat")
+            await env.commit("first")
+            (env.tmp_dir / "bin.dat").write_bytes(b"\xff\xfe line1\nsecond\nline3\n")
+            await env.git_ctx.git("add", "bin.dat")
+            await env.commit("second")
+
+            (env.tmp_dir / "bin.dat").write_bytes(b"\xff\xfe line1\nconflict\nline3\n")
+            await env.git_ctx.git("add", "bin.dat")
+            args = make_amend_args(ref_or_topic="HEAD~1", edit=False)
+
+            with pytest.raises(RevupConflictException):
+                await amend.main(args, env.git_ctx)
+
 
 class TestAmendMultipleFiles:
     @async_test
