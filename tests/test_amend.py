@@ -996,3 +996,27 @@ class TestAmendLastTouched:
             assert await env.get_file_at_commit("keep.txt", "HEAD~1") == "k"
             assert await env.get_file_at_commit("b.txt", "HEAD") == "b1"
             assert not await env.has_staged_changes()
+
+    @async_test
+    async def test_paths_with_special_chars_and_unicode(self):
+        # git C-quotes paths with spaces/unicode unless -z is used; exercise both
+        # a modification and a deletion of such paths in one run.
+        async with GitTestEnvironment() as env:
+            await env.commit("root", {"root.txt": "r"})
+            await env.git_ctx.git("branch", "origin/main", "HEAD")
+            await env.commit(
+                "first\n\nTopic: alpha",
+                {"süb dir/fïle a.txt": "v1", "dél été.txt": "d1"},
+            )
+            await env.commit("second\n\nTopic: beta", {"b.txt": "b1"})
+
+            # Modify the unicode/space path and delete another such path.
+            await env.stage_file("süb dir/fïle a.txt", "v2")
+            await env.git_ctx.git("rm", "dél été.txt")
+            args = make_amend_args(last_touched=True, parse_topics=True)
+            await amend.main(args, env.git_ctx)
+
+            assert await env.get_file_at_commit("süb dir/fïle a.txt", "HEAD~1") == "v2"
+            assert await env.git_ctx.git_return_code("cat-file", "-e", "HEAD:dél été.txt") != 0
+            assert await env.get_file_at_commit("b.txt", "HEAD") == "b1"
+            assert not await env.has_staged_changes()
