@@ -627,9 +627,11 @@ class Git:
         """
         if not paths:
             return await self.empty_tree()
-        ls_output = await self.git_stdout("ls-tree", "-r", tree, "--", *paths)
+        # -z gives NUL-terminated, unquoted paths so names with special chars or
+        # unicode aren't C-quoted, matching make_tree_from_index_entries's format.
+        ls_output = await self.git_stdout("ls-tree", "-r", "-z", tree, "--", *paths)
         entries = []
-        for line in ls_output.split("\n"):
+        for line in ls_output.split("\0"):
             if not line:
                 continue
             meta, path = line.split("\t", 1)

@@ -158,7 +158,9 @@ async def rebuild_stack_last_touched(
     Rebuild the stack, amending each staged file into the most recent commit that touched it.
     Returns the new HEAD commit.
     """
-    # Map each staged file to its most recent commit in the stack (ordered oldest-first)
+    # Map each staged file to its most recent commit in the stack (ordered oldest-first).
+    # -z gives NUL-terminated, unquoted paths so names with spaces, quotes, or unicode
+    # match staged_files (also -z) exactly rather than git's default C-quoted form.
     file_to_commit: Dict[str, int] = {}
     for i, commit_obj in enumerate(stack):
         touched = await git_ctx.git_stdout(
@@ -167,9 +169,10 @@ async def rebuild_stack_last_touched(
             "--name-only",
             "-r",
             "--no-renames",
+            "-z",
             commit_obj.commit_id,
         )
-        for f in touched.split("\n"):
+        for f in touched.split("\0"):
             if f and f in staged_files:
                 file_to_commit[f] = i
 
@@ -185,8 +188,8 @@ async def rebuild_stack_last_touched(
     # A staged deletion has no entry here; its path stays out of staged_entries so
     # the overlay omits it, which the pre-image merge base below turns into a removal.
     staged_entries: Dict[str, str] = {}
-    ls_output = await git_ctx.git_stdout("ls-files", "--stage", "--", *files_to_amend)
-    for line in ls_output.split("\n"):
+    ls_output = await git_ctx.git_stdout("ls-files", "--stage", "-z", "--", *files_to_amend)
+    for line in ls_output.split("\0"):
         if not line:
             continue
         _, path = line.split("\t", 1)
@@ -286,7 +289,7 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
 
     if args.last_touched:
         staged_files_output = await git_ctx.git_stdout(
-            "diff-index", "--cached", "-r", "--name-only", "--no-renames", "HEAD"
+            "diff-index", "--cached", "-r", "--name-only", "--no-renames", "-z", "HEAD"
         )
         if not staged_files_output:
             return 0
@@ -304,7 +307,7 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
         if not stack:
             return 0
 
-        staged_files = set(staged_files_output.split("\n"))
+        staged_files = set(f for f in staged_files_output.split("\0") if f)
         new_commit = await rebuild_stack_last_touched(git_ctx, stack, staged_files)
         if not new_commit:
             return 0
