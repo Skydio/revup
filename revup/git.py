@@ -32,15 +32,6 @@ RE_RAW_PARENT = re.compile(r"^parent (?P<commit>[a-f0-9]+)$", re.MULTILINE)
 RE_RAW_TREE = re.compile(r"^tree (?P<tree>.+)$", re.MULTILINE)
 RE_RAW_COMMIT_MSG_LINE = re.compile(r"^    (?P<line>.*)$", re.MULTILINE)
 
-RE_LS_FILES_LINE = re.compile(
-    r"^[0-9]+ (?P<hash>[0-9a-f]+) (?P<stage>[0-9])\t(?P<path>.*)$", re.MULTILINE
-)
-RE_RAW_DIFF_TREE_LINE = re.compile(
-    r"^:(?P<old_mode>[0-9]+) (?P<new_mode>[0-9]+) (?P<old_hash>[0-9a-f]+) (?P<new_hash>[0-9a-f]+)"
-    r" (?P<type>[a-zA-Z]+)\t(?P<path>.*)$",
-    re.MULTILINE,
-)
-
 RE_COMMIT_HASH = re.compile(r"^[0-9a-f]{8,}")
 
 HEAD_COMMIT = GitCommitHash("HEAD")
