@@ -298,7 +298,10 @@ class Shell:
             raise RuntimeError("{} failed with exit code {}".format(" ".join(args), returncode))
 
         if stdout == subprocess.PIPE:
-            return (returncode, out.decode())  # do a strict decode for actual return
+            # Decode leniently: git output is usually UTF-8 but can contain
+            # arbitrary bytes. A strict decode would crash; replace keeps output
+            # displayable.
+            return (returncode, out.decode(errors="replace"))
         else:
             return (returncode, "")
 
