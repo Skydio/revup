@@ -653,6 +653,24 @@ class TestUploadTopicValidation:
                 await run_upload_pipeline(env)
 
 
+class TestUploadEmptyMessageCommit:
+    @async_test
+    async def test_empty_message_commit_in_range(self):
+        # A commit with an empty message has no indented header lines; parsing it
+        # must not crash.
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            await env.git_ctx.git("commit", "--allow-empty", "--allow-empty-message", "-m", "")
+            await env.commit("feat\n\nTopic: alpha", {"a.txt": "a"})
+
+            topics = await run_upload_pipeline(env)
+
+            assert "alpha" in topics.topics
+            review = topics.topics["alpha"].reviews["origin/main"]
+            content = await get_file_at_ref(env, review.new_commits[-1], "a.txt")
+            assert content == "a"
+
+
 class TestUploadCherryPickConflicts:
     @async_test
     async def test_same_file_different_topics_conflicts(self):

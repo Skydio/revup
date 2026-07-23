@@ -53,7 +53,6 @@ def parse_commit_header(raw_header: str) -> CommitHeader:
         return m.group(group)
 
     tree = GitTreeHash(_search_group(raw_header, RE_RAW_TREE, "tree"))
-    title = _search_group(raw_header, RE_RAW_COMMIT_MSG_LINE, "line")
     commit_id = GitCommitHash(_search_group(raw_header, RE_RAW_COMMIT_ID, "commit"))
     parents = [GitCommitHash(m.group("commit")) for m in RE_RAW_PARENT.finditer(raw_header)]
     author_name = _search_group(raw_header, RE_RAW_AUTHOR, "name")
@@ -62,7 +61,11 @@ def parse_commit_header(raw_header: str) -> CommitHeader:
     committer_name = _search_group(raw_header, RE_RAW_COMMITTER, "name")
     committer_email = _search_group(raw_header, RE_RAW_COMMITTER, "email")
     committer_date = _search_group(raw_header, RE_RAW_COMMITTER, "date")
-    commit_msg = "\n".join(m.group("line") for m in RE_RAW_COMMIT_MSG_LINE.finditer(raw_header))
+    # A commit may have an empty message (no indented lines), so derive the title
+    # and message from whatever lines exist rather than asserting one is present.
+    msg_lines = [m.group("line") for m in RE_RAW_COMMIT_MSG_LINE.finditer(raw_header)]
+    title = msg_lines[0] if msg_lines else ""
+    commit_msg = "\n".join(msg_lines)
     return CommitHeader(
         tree,
         parents,
