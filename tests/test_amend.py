@@ -794,6 +794,7 @@ class TestAmendLastTouched:
             assert await env.get_file_at_commit("a.txt", "HEAD") == "v3"
             # b.txt should be unchanged
             assert await env.get_file_at_commit("b.txt", "HEAD") == "v1"
+            assert not await env.has_staged_changes()
 
     @async_test
     async def test_multiple_files_to_different_commits(self):
@@ -813,6 +814,7 @@ class TestAmendLastTouched:
             assert await env.get_file_at_commit("a.txt", "HEAD~2") == "a2"
             assert await env.get_file_at_commit("b.txt", "HEAD~1") == "b2"
             assert await env.get_file_at_commit("c.txt", "HEAD") == "c2"
+            assert not await env.has_staged_changes()
 
     @async_test
     async def test_amended_change_propagates_forward(self):
@@ -846,10 +848,8 @@ class TestAmendLastTouched:
             args = make_amend_args(last_touched=True, parse_topics=True)
             await amend.main(args, env.git_ctx)
 
-            # new.txt should still be staged
-            assert await env.has_staged_changes()
-            staged = await env.get_staged_files()
-            assert "new.txt" in staged
+            # new.txt should still be staged, and be the only thing left staged
+            assert await env.get_staged_files() == ["new.txt"]
 
     @async_test
     async def test_uses_most_recent_commit_for_file(self):
@@ -868,6 +868,7 @@ class TestAmendLastTouched:
             assert await env.get_file_at_commit("a.txt", "HEAD") == "v3"
             # "first" keeps its original content
             assert await env.get_file_at_commit("a.txt", "HEAD~1") == "v1"
+            assert not await env.has_staged_changes()
 
     @async_test
     async def test_preserves_commit_messages(self):
@@ -885,6 +886,7 @@ class TestAmendLastTouched:
             msg2 = await env.get_commit_message("HEAD")
             assert "first msg" in msg1
             assert "second msg" in msg2
+            assert not await env.has_staged_changes()
 
     @async_test
     async def test_noop_when_no_staged_files(self):
@@ -898,6 +900,7 @@ class TestAmendLastTouched:
             await amend.main(args, env.git_ctx)
 
             assert await env.get_commit_hash() == original_hash
+            assert not await env.has_staged_changes()
 
     @async_test
     async def test_mutually_exclusive_with_ref_or_topic(self):
@@ -955,6 +958,7 @@ class TestAmendLastTouched:
             assert await env.get_file_at_commit("src/lib/a.txt", "HEAD~1") == "a2"
             assert await env.get_file_at_commit("src/lib/c.txt", "HEAD~1") == "c2"
             assert await env.get_file_at_commit("src/lib/b.txt", "HEAD") == "b1"
+            assert not await env.has_staged_changes()
 
     @async_test
     async def test_with_all_flag_stages_unstaged_changes(self):
@@ -969,3 +973,26 @@ class TestAmendLastTouched:
             await amend.main(args, env.git_ctx)
 
             assert await env.get_file_at_commit("a.txt", "HEAD") == "a2"
+            assert not await env.has_staged_changes()
+
+    @async_test
+    async def test_staged_deletion_amended_into_last_commit(self):
+        async with GitTestEnvironment() as env:
+            await env.commit("root", {"root.txt": "r"})
+            await env.git_ctx.git("branch", "origin/main", "HEAD")
+            # a.txt is added in "first", b.txt in "second".
+            await env.commit("first\n\nTopic: alpha", {"a.txt": "v1", "keep.txt": "k"})
+            await env.commit("second\n\nTopic: beta", {"b.txt": "b1"})
+
+            # Stage a deletion of a.txt; it should be removed from "first" (the
+            # commit that added it) and stay gone through the rebuilt "second".
+            await env.git_ctx.git("rm", "a.txt")
+            args = make_amend_args(last_touched=True, parse_topics=True)
+            await amend.main(args, env.git_ctx)
+
+            assert await env.git_ctx.git_return_code("cat-file", "-e", "HEAD~1:a.txt") != 0
+            assert await env.git_ctx.git_return_code("cat-file", "-e", "HEAD:a.txt") != 0
+            # Sibling file in the same commit is untouched.
+            assert await env.get_file_at_commit("keep.txt", "HEAD~1") == "k"
+            assert await env.get_file_at_commit("b.txt", "HEAD") == "b1"
+            assert not await env.has_staged_changes()

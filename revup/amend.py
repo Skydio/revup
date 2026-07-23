@@ -181,7 +181,9 @@ async def rebuild_stack_last_touched(
     if not files_to_amend:
         return GitCommitHash("")
 
-    # Get index entries for each staged file (format: <mode> <blob> <stage>\t<path>)
+    # Get index entries for each staged file (format: <mode> <blob> <stage>\t<path>).
+    # A staged deletion has no entry here; its path stays out of staged_entries so
+    # the overlay omits it, which the pre-image merge base below turns into a removal.
     staged_entries: Dict[str, str] = {}
     ls_output = await git_ctx.git_stdout("ls-files", "--stage", "--", *files_to_amend)
     for line in ls_output.split("\n"):
@@ -199,11 +201,21 @@ async def rebuild_stack_last_touched(
         if i not in commit_to_files:
             continue
 
-        # Build a tree of just this commit's staged files and overlay it onto the
-        # cherry-picked commit. The merge base is the empty tree, so --theirs will
-        # always take the incoming version and will never conflict.
+        # Overlay the staged version of this commit's files onto the cherry-picked
+        # commit via a merge with --theirs, which takes the staged (incoming) side.
+        # Modified/added files resolve against an empty base as add/add. Deletions
+        # can't be expressed by a tree, so the base carries the pre-image of only
+        # the deleted files: absent from the overlay, present in base == ours, they
+        # merge to a removal without conflict. With no deletions the base is empty
+        # and no extra git calls are made.
+        deleted = [f for f in commit_to_files[i] if f not in staged_entries]
+        base_tree = (
+            await git_ctx.make_tree_from_paths(await git_ctx.to_tree(new_commit), deleted)
+            if deleted
+            else await git_ctx.empty_tree()
+        )
         overlay = await git_ctx.make_tree_from_index_entries(
-            [staged_entries[f] for f in commit_to_files[i]]
+            [staged_entries[f] for f in commit_to_files[i] if f in staged_entries]
         )
         amended = CommitHeader(GitTreeHash(""), [rebuilt_parent])
         amended.author_name = commit_obj.author_name
@@ -218,7 +230,7 @@ async def rebuild_stack_last_touched(
             new_commit,
             GitCommitHash(overlay),
             amended,
-            GitCommitHash(await git_ctx.empty_tree()),
+            GitCommitHash(base_tree),
             "theirs",
         )
 
