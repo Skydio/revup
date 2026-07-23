@@ -53,6 +53,20 @@ class TestConfigSetAndRead:
             conf2.read()
             assert conf2.config.get("revup", "forge_url") == "github.enterprise.com"
 
+    def test_value_with_percent_sign(self):
+        # A '%' in a value must not trigger configparser interpolation on write or read.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "config")
+            conf = Config(path)
+            conf.read()
+
+            conf.set_value("upload", "labels", "rel-50%-done")
+            conf.write()
+
+            conf2 = Config(path)
+            conf2.read()
+            assert conf2.config.get("upload", "labels") == "rel-50%-done"
+
     def test_set_value_idempotent(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "config")
