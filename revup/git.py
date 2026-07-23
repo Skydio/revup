@@ -614,9 +614,28 @@ class Git:
                     continue
                 subtree = await build(child)
                 lines.append(f"040000 tree {subtree}\t{name}")
-            return GitTreeHash(await self.git_stdout("mktree", input_str="\n".join(lines) + "\n"))
+            # An empty input produces the empty tree; a lone blank line is an error.
+            input_str = "\n".join(lines) + "\n" if lines else ""
+            return GitTreeHash(await self.git_stdout("mktree", input_str=input_str))
 
         return await build(root)
+
+    async def make_tree_from_paths(self, tree: GitTreeHash, paths: List[str]) -> GitTreeHash:
+        """
+        Build a tree containing only `paths`, each with the content it has in
+        `tree`. Returns the empty tree if `paths` is empty.
+        """
+        if not paths:
+            return await self.empty_tree()
+        ls_output = await self.git_stdout("ls-tree", "-r", tree, "--", *paths)
+        entries = []
+        for line in ls_output.split("\n"):
+            if not line:
+                continue
+            meta, path = line.split("\t", 1)
+            mode, _type, blob = meta.split(" ")
+            entries.append(f"{mode} {blob} 0\t{path}")
+        return await self.make_tree_from_index_entries(entries)
 
     @lru_cache(maxsize=None)
     async def merge_tree(
