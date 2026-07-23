@@ -126,7 +126,9 @@ class Config:
         repo_config_path: str = "",
         git_dir_config_path: str = "",
     ):
-        self.config = configparser.ConfigParser()
+        # interpolation=None: config values are literal and may contain '%'
+        # (labels, URLs, aliases); the default interpolation would crash on it.
+        self.config = configparser.ConfigParser(interpolation=None)
         self.config_path = config_path
         self.repo_config_path = repo_config_path
         self.git_dir_config_path = git_dir_config_path
@@ -138,7 +140,7 @@ class Config:
         for path in (self.config_path, self.repo_config_path, self.git_dir_config_path):
             if not path:
                 continue
-            file_conf = configparser.ConfigParser()
+            file_conf = configparser.ConfigParser(interpolation=None)
             if file_conf.read(path):
                 self.file_configs.append((path, file_conf))
             self.config.read(path)
