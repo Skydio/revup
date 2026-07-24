@@ -9,3 +9,7 @@ extend-select = ["I"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["revup"]
+
+[tool.coverage.run]
+# Keep the coverage data file out of the repo root.
+data_file = "build/.coverage"
