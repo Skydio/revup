@@ -15,14 +15,14 @@ from rich import get_console
 from rich.markup import escape
 
 from revup import git
-from revup.forge import MAX_COMMENTS_TO_QUERY, Forge, PrComment, PrInfo, PrUpdate
-from revup.types import (
+from revup.core_types import (
     GitCommitHash,
     GitConflictException,
     GitTreeHash,
     RevupConflictException,
     RevupUsageException,
 )
+from revup.forge import MAX_COMMENTS_TO_QUERY, Forge, PrComment, PrInfo, PrUpdate
 
 # Since topic name is incorporated into the branch name, we must ensure that it matches
 # the character set that forges support. It's possible to have other characters if they're

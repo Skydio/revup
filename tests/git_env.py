@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 
 from revup import git, shell
-from revup.types import GitCommitHash
+from revup.core_types import GitCommitHash
 
 TEST_AUTHOR_NAME = "Test Author"
 TEST_AUTHOR_EMAIL = "test@example.com"

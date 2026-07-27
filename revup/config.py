@@ -7,7 +7,7 @@ import re
 from argparse import _StoreAction, _StoreFalseAction, _StoreTrueAction
 from typing import Any, Dict, List, Optional, Tuple
 
-from revup.types import RevupUsageException
+from revup.core_types import RevupUsageException
 
 
 class RevupArgParser(argparse.ArgumentParser):

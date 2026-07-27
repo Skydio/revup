@@ -7,8 +7,8 @@ from typing import Any, Optional, Tuple, Union
 
 from aiohttp import ClientSession, ContentTypeError
 
+from revup.core_types import RevupForgeException, RevupRequestException
 from revup.github.graphql import GraphqlResponse
-from revup.types import RevupForgeException, RevupRequestException
 
 # HTTP statuses worth retrying: gateway/timeout (5xx) and secondary-rate-limit (403).
 TRANSIENT_STATUSES = frozenset({500, 502, 503, 504})
