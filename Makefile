@@ -35,18 +35,8 @@ clean:
 	rm -rf $(BUILD_DIR)
 	rm -rf .mypy_cache
 
-REVUP_VERSION:=$(shell $(PYTHON) revup/__init__.py)
+REVUP_VERSION:=$(shell $(PYTHON) revup/version.py)
 REVUP_DATE ?= Apr 21, 2021
-define REVUP_HEADER
----
-title: TITLE
-section: 1
-header: Revup Manual
-footer: revup VERSION
-date: DATE
----
-endef
-export REVUP_HEADER
 
 REVUP_VERSION_HASH?=${shell git rev-parse --short v$(REVUP_VERSION) || echo main}
 
@@ -66,13 +56,11 @@ upload:
 	$(PYTHON) -m twine upload build/revup-$(REVUP_VERSION).tar.gz
 
 man:
-	mkdir -p revup/man1 ; \
-	cd docs ; \
-	for file in *.md ; do \
-		CMD_NAME=`echo $${file} | awk -F'[.]' '{print $$1}'` ; \
-		echo "$${REVUP_HEADER}" | m4 -DTITLE=$${CMD_NAME} -DVERSION=$(REVUP_VERSION) -DDATE="$(REVUP_DATE)" - | \
-		cat - $${file} | pandoc -f markdown-smart -s -t man > ../revup/man1/$${CMD_NAME}.1 || exit 1 ; \
-		gzip -n -f -k ../revup/man1/$${CMD_NAME}.1 || exit 1 ; \
+	mkdir -p revup/man1
+	@for src in docs/*.md ; do \
+		name=$$(basename $${src} .md) ; \
+		scripts/build_manpage.sh "$${name}" "$(REVUP_VERSION)" "$(REVUP_DATE)" \
+			"$${src}" "revup/man1/$${name}.1.gz" || exit 1 ; \
 	done
 
 test:
