@@ -8,7 +8,7 @@ from collections import defaultdict
 from typing import Dict, List, Set
 
 from revup import git, topic_stack
-from revup.types import (
+from revup.core_types import (
     CommitHeader,
     GitCommitHash,
     GitConflictException,

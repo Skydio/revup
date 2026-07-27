@@ -8,7 +8,7 @@ import tempfile
 import pytest
 
 from revup.config import Config, RevupArgParser, collect_known_keys, config_main
-from revup.types import RevupUsageException
+from revup.core_types import RevupUsageException
 
 
 def make_parsers():

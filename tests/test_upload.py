@@ -6,6 +6,7 @@ import pytest
 from fake_forge import FakeForge
 from git_env import GitTestEnvironment, async_test
 
+from revup.core_types import RevupConflictException, RevupUsageException
 from revup.forge import PrInfo
 from revup.topic_stack import (
     PrBodySource,
@@ -14,7 +15,6 @@ from revup.topic_stack import (
     TopicStack,
     format_remote_branch,
 )
-from revup.types import RevupConflictException, RevupUsageException
 
 
 def make_upload_args(**kwargs):

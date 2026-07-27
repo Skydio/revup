@@ -6,8 +6,8 @@ from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 from revup import config, git, logs
+from revup.core_types import RevupUsageException
 from revup.forge import Forge, ForgeRepoInfo, PullRequestParams
-from revup.types import RevupUsageException
 
 RE_PR_URL = re.compile(
     r"^https://(?P<forge_url>[^/]+)/(?P<owner>[^/]+)/(?P<name>[^/]+)/pull/(?P<number>[0-9]+)/?$"

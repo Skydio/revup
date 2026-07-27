@@ -6,8 +6,8 @@ from typing import AsyncGenerator, Tuple
 from rich import get_console
 
 from revup import git, topic_stack
+from revup.core_types import RevupShellException
 from revup.forge import Forge
-from revup.types import RevupShellException
 
 
 class UploadPhase(enum.Enum):

@@ -4,6 +4,12 @@ from collections import defaultdict
 from typing import Dict, List, Optional, Set, Tuple
 
 from revup import git, topic_stack
+from revup.core_types import (
+    GitCommitHash,
+    GitConflictException,
+    GitTreeHash,
+    RevupConflictException,
+)
 from revup.topic_stack import (
     TAG_ASSIGNEE,
     TAG_BRANCH,
@@ -17,12 +23,6 @@ from revup.topic_stack import (
     TAG_UPLOADER,
     TopicStack,
     add_tags,
-)
-from revup.types import (
-    GitCommitHash,
-    GitConflictException,
-    GitTreeHash,
-    RevupConflictException,
 )
 
 TAG_ORDER = [
