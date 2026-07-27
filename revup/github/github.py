@@ -1,6 +1,7 @@
 import logging
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from revup.core_types import RevupForgeException
 from revup.forge import (
     MAX_COMMENTS_TO_QUERY,
     Forge,
@@ -17,7 +18,6 @@ from revup.github.graphql import (
     GraphqlQuery,
     GraphqlResponse,
 )
-from revup.types import RevupForgeException
 
 PR_FRAGMENT = f"""
         fragment PrResult on PullRequestConnection {{

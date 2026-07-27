@@ -3,8 +3,8 @@ import logging
 from typing import Tuple
 
 from revup import config, git
+from revup.core_types import GitCommitHash, GitTreeHash, RevupUsageException
 from revup.forge_utils import RE_PR_URL, forge_connection, parse_pull_request_url
-from revup.types import GitCommitHash, GitTreeHash, RevupUsageException
 
 
 async def resolve_pr_url(

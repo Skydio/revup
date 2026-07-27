@@ -17,9 +17,9 @@ from revup.completion import (
     topic_completer,
 )
 from revup.config import RevupArgParser
+from revup.core_types import RevupUsageException
 from revup.forge_utils import parse_forge_info
 from revup.topic_stack import PrBodySource
-from revup.types import RevupUsageException
 from revup.version import REVUP_VERSION
 
 REVUP_CONFIG_ENV_VAR = "REVUP_CONFIG_PATH"

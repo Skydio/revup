@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple, cast
 from async_lru import alru_cache as lru_cache
 
 from revup import shell
-from revup.types import (
+from revup.core_types import (
     CommitHeader,
     GitCommitHash,
     GitConflict,
