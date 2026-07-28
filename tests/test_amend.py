@@ -10,7 +10,7 @@ from git_env import (
 )
 
 from revup import amend
-from revup.types import RevupConflictException, RevupUsageException
+from revup.core_types import RevupConflictException, RevupUsageException
 
 
 def make_amend_args(**kwargs):

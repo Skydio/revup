@@ -7,11 +7,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from revup.core_types import RevupForgeException, RevupRequestException
 from revup.forge import ForgeRepoInfo, PrComment, PrInfo, PrUpdate
 from revup.github.endpoint import GitHubEndpoint, _backoff_delay
 from revup.github.github import _MAX_STALLED_RETRIES, Github, _merge_data
 from revup.github.graphql import GraphqlResponse
-from revup.types import RevupForgeException, RevupRequestException
 
 
 def gql(data, errors=None):

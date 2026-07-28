@@ -3,14 +3,14 @@ import asyncio
 import logging
 import sys
 
-from revup.revup import build_parser, main
-from revup.types import (
+from revup.core_types import (
     RevupConflictException,
     RevupForgeException,
     RevupRequestException,
     RevupShellException,
     RevupUsageException,
 )
+from revup.revup import build_parser, main
 
 
 def _main() -> None:

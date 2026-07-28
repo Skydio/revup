@@ -2,8 +2,8 @@ import argparse
 import asyncio
 
 from revup import git
+from revup.core_types import RevupUsageException
 from revup.topic_stack import TopicStack
-from revup.types import RevupUsageException
 
 
 async def get_topics(
