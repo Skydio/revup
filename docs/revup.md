@@ -39,8 +39,8 @@ graphql requests to the forge.
 **--forge-oauth**
 : The oauth token that provides login credentials to the forge. Revup
 requires full repository read/write permissions in order to create
-and modify reviews. For GitHub, this is represented by the "repo" section of
-https://github.com/settings/tokens/new.
+and modify reviews. For GitHub, this requires the "repo" and "read:org" scopes at
+https://github.com/settings/tokens/new?scopes=repo,read:org.
 
 **--forge-url**
 : URL to use for the forge. Defaults to "github.com" and would only

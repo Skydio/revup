@@ -110,7 +110,7 @@ async def forge_connection(
             "Set the GITHUB_TOKEN environment variable, "
             "login with 'gh auth login', "
             "or make one at https://github.com/settings/tokens/new "
-            "(revup needs full repo permissions) "
+            "(revup needs the 'repo' and 'read:org' scopes) "
             "then set it with `revup config forge_oauth`."
         )
 
