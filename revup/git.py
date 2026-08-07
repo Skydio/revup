@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import asyncio
 import copy
 import logging
@@ -116,16 +117,16 @@ def get_default_git() -> str:
     return ret
 
 
-async def make_git(
-    sh: shell.Shell,
-    git_path: str = "",
-    git_version: str = "",
-    remote_name: str = "",
-    main_branch: str = "",
-    base_branch_globs: str = "",
-    keep_temp: bool = False,
-    editor: str = "",
-) -> "Git":
+async def make_git(args: argparse.Namespace) -> "Git":
+    sh = shell.Shell(not args.verbose)
+    git_path = args.git_path
+    git_version = args.git_version
+    remote_name = args.fork_name if args.fork_name else args.remote_name
+    main_branch = args.main_branch
+    base_branch_globs = args.base_branch_globs
+    keep_temp = args.keep_temp
+    editor = args.editor
+
     if not git_path:
         git_path = get_default_git()
 
