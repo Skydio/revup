@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import logging
 import os
 import stat
@@ -106,22 +107,6 @@ async def get_config() -> config.Config:
     )
     conf.read()
     return conf
-
-
-async def get_git(args: argparse.Namespace) -> git.Git:
-    sh = shell.Shell(not args.verbose)
-    git_ctx = await git.make_git(
-        sh,
-        args.git_path,
-        args.git_version,
-        args.fork_name if args.fork_name else args.remote_name,
-        args.main_branch,
-        args.base_branch_globs,
-        args.keep_temp,
-        args.editor,
-    )
-
-    return git_ctx
 
 
 def dump_args(args: argparse.Namespace) -> None:
@@ -315,6 +300,14 @@ def build_parser() -> Tuple[RevupArgParser, List[RevupArgParser]]:
     if "_ARGCOMPLETE" in os.environ:
         import argcomplete
 
+        # Apply config before completing so completers resolve the same settings
+        # (main branch, remote, base branch globs) that normal commands use.
+        try:
+            conf = asyncio.run(get_config())
+            conf.apply_to_parsers(all_parsers)
+        except (OSError, RuntimeError, ValueError, RevupUsageException):
+            pass
+
         argcomplete.autocomplete(
             revup_parser,
             always_complete_options=False,
@@ -353,7 +346,7 @@ async def main(revup_parser: RevupArgParser, all_parsers: List[RevupArgParser]) 
 
     dump_args(args)
 
-    git_ctx = await get_git(args)
+    git_ctx = await git.make_git(args)
 
     if args.cmd == "toolkit":
         from revup import toolkit

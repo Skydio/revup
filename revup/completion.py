@@ -41,26 +41,26 @@ SOURCE_LINE_TEMPLATES = {
 }
 
 
-def topic_completer(
-    prefix: str, parsed_args: Optional[argparse.Namespace] = None, **_kwargs: object
-) -> List[str]:
+def topic_completer(prefix: str, parsed_args: argparse.Namespace, **_kwargs: object) -> List[str]:
     try:
-        from revup import git, shell, toolkit
+        from revup import git, toolkit
 
         async def _get_names() -> List[str]:
-            sh = shell.Shell(quiet=True)
-            git_ctx = await git.make_git(sh, "", "", "origin", "main", "", False, "")
-            topics = await toolkit.get_topics(git_ctx)
+            # Build git and topics exactly as `revup toolkit list-topics` does, so
+            # completion resolves the same base branch and returns the same topics.
+            git_ctx = await git.make_git(parsed_args)
+            base_branch = getattr(parsed_args, "base_branch", None) or ""
+            relative_branch = getattr(parsed_args, "relative_branch", None) or ""
+            topics = await toolkit.get_topics(git_ctx, base_branch, relative_branch)
             return [t.name for t in topics.topics.values()]
 
         already = set()
-        if parsed_args is not None:
-            for attr in ("topics", "ref_or_topic"):
-                val = getattr(parsed_args, attr, None)
-                if isinstance(val, list):
-                    already.update(val)
-                elif isinstance(val, str):
-                    already.add(val)
+        for attr in ("topics", "ref_or_topic"):
+            val = getattr(parsed_args, attr, None)
+            if isinstance(val, list):
+                already.update(val)
+            elif isinstance(val, str):
+                already.add(val)
 
         return [n for n in asyncio.run(_get_names()) if n.startswith(prefix) and n not in already]
     except (OSError, RuntimeError):
