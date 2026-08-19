@@ -506,6 +506,22 @@ class TestAmendEdit:
             assert await env.get_commit_hash() == orig_hash
 
     @async_test
+    async def test_edit_no_editor_available_errors(self):
+        async with GitTestEnvironment() as env:
+            await env.commit("root", {"root.txt": "r"})
+            await env.commit("original message", {"a.txt": "a"})
+            orig_hash = await env.get_commit_hash()
+
+            # None means git couldn't resolve an editor, e.g. a dumb terminal with
+            # nothing configured. Don't guess at a fallback.
+            env.git_ctx.editor = None
+            args = make_amend_args(edit=True)
+            with pytest.raises(RevupUsageException, match="Couldn't determine an editor"):
+                await amend.main(args, env.git_ctx)
+
+            assert await env.get_commit_hash() == orig_hash
+
+    @async_test
     async def test_edit_reword_earlier_commit(self):
         async with GitTestEnvironment() as env:
             await env.commit("root", {"root.txt": "r"})

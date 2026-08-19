@@ -139,13 +139,18 @@ async def make_git(
             )
         return email
 
-    async def get_editor() -> str:
+    async def get_editor() -> Optional[str]:
         if editor:
             return editor
-        ret = await git_ctx.git_stdout("config", "core.editor", raiseonerror=False)
-        if not ret:
-            ret = os.environ.get("GIT_EDITOR", os.environ.get("EDITOR", "nano"))
-        return ret
+        # Defer to git's precedence order
+        ret, resolved = await git_ctx.git("var", "GIT_EDITOR", raiseonerror=False)
+        # git exits nonzero when the terminal is dumb and no editor is configured, and
+        # prints nothing if core.editor is explicitly set to empty. Either way there's no
+        # usable editor. Return None rather than raising, since most commands never open
+        # an editor; the failure is reported if and when we actually need one.
+        if ret != 0 or not resolved:
+            return None
+        return resolved
 
     async def get_gpg_sign() -> bool:
         # commit-tree (plumbing) ignores commit.gpgSign, so read it and pass -S ourselves.
@@ -161,11 +166,11 @@ async def make_git(
         git_dir,
         actual_version,
         email,
-        editor,
+        resolved_editor,
         main_exists,
         gpg_sign,
     ) = cast(
-        Tuple[str, str, str, str, str, bool, bool],
+        Tuple[str, str, str, str, Optional[str], bool, bool],
         await asyncio.gather(
             git_ctx.git_stdout("rev-parse", "--show-toplevel"),
             git_ctx.git_stdout("rev-parse", "--path-format=absolute", "--git-dir"),
@@ -193,7 +198,7 @@ async def make_git(
     git_ctx.git_dir = git_dir
     git_ctx.email = email.lower()
     git_ctx.author = git_ctx.email.split("@")[0]
-    git_ctx.editor = editor
+    git_ctx.editor = resolved_editor
     git_ctx.gpg_sign = gpg_sign
     if not main_exists:
         if main_branch in COMMON_MAIN_BRANCHES:
@@ -234,7 +239,9 @@ class Git:
 
     email: str
     author: str
-    editor: str
+
+    # Editor to use for message editing, or None if git couldn't resolve one
+    editor: Optional[str]
 
     # Whether to GPG/SSH sign commits revup creates, from git config commit.gpgSign
     gpg_sign: bool
