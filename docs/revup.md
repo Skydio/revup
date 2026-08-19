@@ -62,8 +62,7 @@ merges. Relative-Branch cannot be used across forks.
 
 **--editor**
 : The user's preferred editor, used for various message and file
-editing. If not set, value is taken first from "git config core.editor"
-then from the GIT_EDITOR env value, then from EDITOR.
+editing. If not set, the value is taken from `git var GIT_EDITOR`.
 
 **--keep-temp, -k**
 : Occasionally, files will need to be stored to disk for various

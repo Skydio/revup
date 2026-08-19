@@ -5,7 +5,7 @@ import re
 import shlex
 import subprocess
 from collections import defaultdict
-from typing import Dict, List, Set
+from typing import Dict, List, Optional, Set
 
 from revup import git, topic_stack
 from revup.core_types import (
@@ -28,7 +28,7 @@ with '{}' will be ignored, and an empty message aborts the amend."""
 
 async def invoke_editor_for_commit_msg(
     git_ctx: git.Git,
-    editor: str,
+    editor: Optional[str],
     topic_summary: str,
     commit_msg: str,
     cache_stat: str,
@@ -39,6 +39,9 @@ async def invoke_editor_for_commit_msg(
     Stats for the commit are shown in comment lines in the editor.
     Return the final message with comment lines stripped out.
     """
+    if not editor:
+        raise RevupUsageException("Couldn't determine an editor to use, fix your git configuration")
+
     full_stat = []
     if cache_stat:
         full_stat.append(f"Changes to be committed:\n{cache_stat}")
