@@ -864,11 +864,17 @@ class TopicStack:
                     # For a relative series of reviews, revup will only ever upload them directly
                     # on top of each other. If this relationship is ever broken, we always reupload
                     # This ensures predictable and consistent CI behavior between the branches.
-                    is_on_correct_base = (
-                        topic.relative_topic.reviews[base_branch].pr_info is None
-                        or review.remote_commits[0].parents[0]
-                        == topic.relative_topic.reviews[base_branch].remote_commits[-1].commit_id
-                    )
+                    relative_review = topic.relative_topic.reviews[base_branch]
+                    if relative_review.pr_info is None:
+                        is_on_correct_base = True
+                    elif not relative_review.remote_commits:
+                        # We can't verify the relationship so reupload
+                        is_on_correct_base = False
+                    else:
+                        is_on_correct_base = (
+                            review.remote_commits[0].parents[0]
+                            == relative_review.remote_commits[-1].commit_id
+                        )
 
                 relative_topic_is_nochange = (
                     topic.relative_topic is not None
