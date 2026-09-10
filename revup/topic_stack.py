@@ -345,7 +345,6 @@ class TopicStack:
             or not self.forge
             or review.pr_info is None
             or review.pr_info.headRefOid is None
-            or review.pr_info.baseRefOid is None
             or review.base_ref is None
         ):
             return None
@@ -372,12 +371,12 @@ class TopicStack:
             if review.status == PrStatus.NEW:
                 # New PR, diff against base to show full diff
                 diff_base = review.base_ref
-            elif review.base_ref != review.pr_info.baseRefOid:
+            elif review.base_ref != review.remote_commits[0].parents[0]:
                 # Rebased review, make a virtual diff target
                 if self.last_virtual_diff_target is None:
                     self.last_virtual_diff_target = GitCommitHash(self.base_branch)
                 self.last_virtual_diff_target = await self.git_ctx.make_virtual_diff_target(
-                    GitCommitHash(review.pr_info.baseRefOid),
+                    review.remote_commits[0].parents[0],
                     GitCommitHash(review.pr_info.headRefOid),
                     review.base_ref,
                     review.new_commits[-1],
@@ -779,7 +778,7 @@ class TopicStack:
                 review.status = PrStatus.NEW
                 review.pr_info = None
 
-            if review.pr_info and (not review.pr_info.baseRefOid or not review.pr_info.headRefOid):
+            if review.pr_info and (not review.pr_info.headRefOid or not review.pr_info.numCommits):
                 logging.warning(f"Branch {review.remote_head} was merged but has no commits!")
                 review.status = PrStatus.NEW
                 review.pr_info = None
@@ -801,15 +800,16 @@ class TopicStack:
                 # This is a new pr, no need to check for rebase
                 review.is_pure_rebase = False
             else:
-                assert (
-                    review.pr_info.baseRefOid is not None and review.pr_info.headRefOid is not None
-                )
+                assert review.pr_info.headRefOid is not None
+                # Forges list a pr's commits in the order they were associated with it, which isn't
+                # topological, so we can't identify the base commit from that list. Instead walk
+                # back from the head by however many commits the pr claims to have.
                 review.remote_commits = git.parse_rev_list(
                     await self.git_ctx.rev_list(
                         review.pr_info.headRefOid,
-                        review.pr_info.baseRefOid,
                         header=True,
                         first_parent=True,
+                        max_revs=review.pr_info.numCommits,
                     )
                 )
 
@@ -1279,9 +1279,9 @@ class TopicStack:
                         )
                     review.pr_info = PrInfo(
                         baseRef=review.remote_base,
-                        baseRefOid=review.base_ref,
                         headRef=review.remote_head,
                         headRefOid=review.new_commits[-1],
+                        numCommits=len(review.new_commits),
                         body=body,
                         title=title,
                         is_draft=review.is_draft,

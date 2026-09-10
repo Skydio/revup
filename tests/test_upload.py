@@ -904,8 +904,8 @@ def make_pr_info(review, base_branch="main"):
     return PrInfo(
         baseRef=base_branch,
         headRef=review.remote_head,
-        baseRefOid=review.base_ref,
         headRefOid=review.new_commits[-1],
+        numCommits=len(review.new_commits),
         body="",
         title="",
         state="OPEN",
@@ -940,7 +940,7 @@ class TestRebaseDetection:
             first = await run_upload_pipeline(env)
             first_review = first.topics["alpha"].reviews["origin/main"]
             remote_head = first_review.new_commits[-1]
-            remote_base = first_review.base_ref
+            remote_num_commits = len(first_review.new_commits)
 
             # Reword the commit (same diff, different message)
             await env.git_ctx.git("commit", "--amend", "-m", "new title\n\nTopic: alpha")
@@ -951,8 +951,8 @@ class TestRebaseDetection:
             review.pr_info = PrInfo(
                 baseRef="main",
                 headRef=review.remote_head,
-                baseRefOid=remote_base,
                 headRefOid=remote_head,
+                numCommits=remote_num_commits,
                 body="",
                 title="",
                 state="OPEN",
@@ -973,7 +973,7 @@ class TestRebaseDetection:
             first = await run_upload_pipeline(env)
             first_review = first.topics["alpha"].reviews["origin/main"]
             remote_head = first_review.new_commits[-1]
-            remote_base = first_review.base_ref
+            remote_num_commits = len(first_review.new_commits)
 
             # Amend with different content
             await env.stage_file("a.txt", "v2")
@@ -984,8 +984,8 @@ class TestRebaseDetection:
             review.pr_info = PrInfo(
                 baseRef="main",
                 headRef=review.remote_head,
-                baseRefOid=remote_base,
                 headRefOid=remote_head,
+                numCommits=remote_num_commits,
                 body="",
                 title="",
                 state="OPEN",
@@ -1007,7 +1007,7 @@ class TestRebaseDetection:
             first = await run_upload_pipeline(env)
             first_review = first.topics["alpha"].reviews["origin/main"]
             remote_head = first_review.new_commits[-1]
-            remote_base = first_review.base_ref
+            remote_num_commits = len(first_review.new_commits)
 
             # Advance origin/main independently, then rebase local onto it
             await env.git_ctx.git("checkout", root)
@@ -1022,8 +1022,8 @@ class TestRebaseDetection:
             review.pr_info = PrInfo(
                 baseRef="main",
                 headRef=review.remote_head,
-                baseRefOid=remote_base,
                 headRefOid=remote_head,
+                numCommits=remote_num_commits,
                 body="",
                 title="",
                 state="OPEN",
@@ -1045,7 +1045,7 @@ class TestRebaseDetection:
             first = await run_upload_pipeline(env)
             first_review = first.topics["alpha"].reviews["origin/main"]
             remote_head = first_review.new_commits[-1]
-            remote_base = first_review.base_ref
+            remote_num_commits = len(first_review.new_commits)
 
             # Advance and rebase
             await env.git_ctx.git("checkout", root)
@@ -1060,8 +1060,8 @@ class TestRebaseDetection:
             review.pr_info = PrInfo(
                 baseRef="main",
                 headRef=review.remote_head,
-                baseRefOid=remote_base,
                 headRefOid=remote_head,
+                numCommits=remote_num_commits,
                 body="",
                 title="",
                 state="OPEN",
@@ -1082,7 +1082,7 @@ class TestRebaseDetection:
             first = await run_upload_pipeline(env)
             first_review = first.topics["alpha"].reviews["origin/main"]
             remote_head = first_review.new_commits[-1]
-            remote_base = first_review.base_ref
+            remote_num_commits = len(first_review.new_commits)
 
             # Amend with new content
             await env.stage_file("a.txt", "v2")
@@ -1093,8 +1093,8 @@ class TestRebaseDetection:
             review.pr_info = PrInfo(
                 baseRef="main",
                 headRef=review.remote_head,
-                baseRefOid=remote_base,
                 headRefOid=remote_head,
+                numCommits=remote_num_commits,
                 body="",
                 title="",
                 state="MERGED",
@@ -1118,9 +1118,9 @@ class TestRebaseDetection:
             parent_review = first.topics["parent"].reviews["origin/main"]
             child_review = first.topics["child"].reviews["origin/main"]
             parent_remote_head = parent_review.new_commits[-1]
-            parent_remote_base = parent_review.base_ref
+            parent_remote_num_commits = len(parent_review.new_commits)
             child_remote_head = child_review.new_commits[-1]
-            child_remote_base = child_review.base_ref
+            child_remote_num_commits = len(child_review.new_commits)
 
             # Advance origin/main independently, then rebase local onto it
             await env.git_ctx.git("checkout", root)
@@ -1142,8 +1142,8 @@ class TestRebaseDetection:
             p_review.pr_info = PrInfo(
                 baseRef="main",
                 headRef=p_review.remote_head,
-                baseRefOid=parent_remote_base,
                 headRefOid=parent_remote_head,
+                numCommits=parent_remote_num_commits,
                 body="",
                 title="",
                 state="OPEN",
@@ -1151,8 +1151,8 @@ class TestRebaseDetection:
             c_review.pr_info = PrInfo(
                 baseRef=p_review.remote_head,
                 headRef=c_review.remote_head,
-                baseRefOid=child_remote_base,
                 headRefOid=child_remote_head,
+                numCommits=child_remote_num_commits,
                 body="",
                 title="",
                 state="OPEN",
@@ -1176,7 +1176,7 @@ class TestRebaseDetection:
             first = await run_upload_pipeline(env)
             first_review = first.topics["alpha"].reviews["origin/main"]
             remote_head = first_review.new_commits[-1]
-            remote_base = first_review.base_ref
+            remote_num_commits = len(first_review.new_commits)
 
             # Amend only the second commit (HEAD) with new content
             await env.stage_file("b.txt", "b_new")
@@ -1187,8 +1187,8 @@ class TestRebaseDetection:
             review.pr_info = PrInfo(
                 baseRef="main",
                 headRef=review.remote_head,
-                baseRefOid=remote_base,
                 headRefOid=remote_head,
+                numCommits=remote_num_commits,
                 body="",
                 title="",
                 state="OPEN",
@@ -1209,7 +1209,7 @@ class TestRebaseDetection:
             first = await run_upload_pipeline(env)
             first_review = first.topics["alpha"].reviews["origin/main"]
             remote_head = first_review.new_commits[-1]
-            remote_base = first_review.base_ref
+            remote_num_commits = len(first_review.new_commits)
 
             # Add a second commit to the same topic
             await env.commit("c2\n\nTopic: alpha", {"b.txt": "b"})
@@ -1219,8 +1219,8 @@ class TestRebaseDetection:
             review.pr_info = PrInfo(
                 baseRef="main",
                 headRef=review.remote_head,
-                baseRefOid=remote_base,
                 headRefOid=remote_head,
+                numCommits=remote_num_commits,
                 body="",
                 title="",
                 state="OPEN",
@@ -1254,7 +1254,7 @@ class TestRebaseDetection:
             first = await run_upload_pipeline(env)
             first_review = first.topics["alpha"].reviews["origin/main"]
             remote_head = first_review.new_commits[-1]
-            remote_base = first_review.base_ref
+            remote_num_commits = len(first_review.new_commits)
 
             # Second run with the same commits — should detect as rebase
             topics = await run_upload_pipeline(env)
@@ -1262,8 +1262,8 @@ class TestRebaseDetection:
             review.pr_info = PrInfo(
                 baseRef="main",
                 headRef=review.remote_head,
-                baseRefOid=remote_base,
                 headRefOid=remote_head,
+                numCommits=remote_num_commits,
                 body="",
                 title="",
                 state="OPEN",
@@ -1272,6 +1272,69 @@ class TestRebaseDetection:
             await topics.mark_rebases(skip_rebase=True)
 
             assert review.is_pure_rebase
+
+    @async_test
+    async def test_base_derived_by_walking_back_from_head(self):
+        """A branch holding more commits than its topic must still resolve a base.
+
+        Forges list a pr's commits in association order, not topological order, so the base can
+        only come from walking back numCommits from the head.
+        """
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            root = await env.get_commit_hash()
+            await env.commit("a\n\nTopic: alpha", {"a.txt": "a"})
+            await env.commit("b\n\nTopic: beta\nRelative: alpha", {"b.txt": "b"})
+            await env.commit("c\n\nTopic: gamma\nRelative: beta", {"c.txt": "c"})
+
+            first = await run_upload_pipeline(env)
+            alpha_review = first.topics["alpha"].reviews["origin/main"]
+            beta_review = first.topics["beta"].reviews["origin/main"]
+            gamma_review = first.topics["gamma"].reviews["origin/main"]
+            beta_remote_head = beta_review.new_commits[-1]
+            # Beta's branch is stacked on alpha's, so once alpha is gone the forge counts both.
+            beta_num_commits = len(alpha_review.new_commits) + len(beta_review.new_commits)
+            gamma_remote_head = gamma_review.new_commits[-1]
+            gamma_num_commits = len(gamma_review.new_commits)
+
+            # Drop alpha from the local stack, as if it had merged.
+            await env.git_ctx.git("reset", "--hard", root)
+            await env.commit("b\n\nTopic: beta\nRelative: alpha", {"b.txt": "b"})
+            await env.commit("c\n\nTopic: gamma\nRelative: beta", {"c.txt": "c"})
+
+            topics = await run_upload_pipeline(env)
+            b_review = topics.topics["beta"].reviews["origin/main"]
+            g_review = topics.topics["gamma"].reviews["origin/main"]
+            b_review.pr_info = PrInfo(
+                baseRef="main",
+                headRef=b_review.remote_head,
+                headRefOid=beta_remote_head,
+                numCommits=beta_num_commits,
+                body="",
+                title="",
+                state="OPEN",
+            )
+            g_review.pr_info = PrInfo(
+                baseRef=b_review.remote_head,
+                headRef=g_review.remote_head,
+                headRefOid=gamma_remote_head,
+                numCommits=gamma_num_commits,
+                body="",
+                title="",
+                state="OPEN",
+            )
+
+            await topics.mark_rebases(skip_rebase=True)
+
+            assert [c.commit_id for c in b_review.remote_commits] == [
+                await env.get_commit_hash(f"{beta_remote_head}~1"),
+                beta_remote_head,
+            ]
+            assert b_review.remote_commits[0].parents[0] == root
+            assert not b_review.is_pure_rebase
+            # Gamma being a rebase is what makes it read beta's remote commits.
+            assert g_review.is_pure_rebase
+            assert g_review.remote_commits[0].parents[0] == b_review.remote_commits[-1].commit_id
 
 
 class TestSkipEmptyFirstCommit:
