@@ -27,10 +27,10 @@ class PrComment:
 class PrInfo:
     baseRef: str
     headRef: str
-    baseRefOid: Optional[str]
     headRefOid: Optional[str]
     body: str
     title: str
+    numCommits: int = 0
     id: str = ""
     url: str = ""
     state: str = ""

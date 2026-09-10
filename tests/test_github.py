@@ -38,7 +38,7 @@ def make_pr_node(
     state: str = "OPEN",
     base_ref: str = "main",
     head_oid: str = "abc123",
-    base_oid: str = "def456",
+    num_commits: int = 1,
     is_draft: bool = False,
     reviewers: List[Dict] = None,
     team_reviewers: List[Dict] = None,
@@ -64,8 +64,8 @@ def make_pr_node(
                 "body": "body",
                 "title": "title",
                 "isDraft": is_draft,
-                "baseCommit": {"nodes": [{"commit": {"parents": {"nodes": [{"oid": base_oid}]}}}]},
-                "headCommit": {"nodes": [{"commit": {"oid": head_oid}}]},
+                "headRefOid": head_oid,
+                "commits": {"totalCount": num_commits},
                 "reviewRequests": {"nodes": review_requests},
                 "timelineItems": {"nodes": timeline_items or []},
                 "latestReviews": {"nodes": latest_reviews or []},
@@ -462,9 +462,7 @@ class TestCreatePullRequests:
         )
         gh = make_github(endpoint, fork_owner="myfork")
 
-        pr = PrInfo(
-            baseRef="main", headRef="feat1", baseRefOid=None, headRefOid=None, body="b", title="t"
-        )
+        pr = PrInfo(baseRef="main", headRef="feat1", headRefOid=None, body="b", title="t")
         asyncio.run(gh.create_pull_requests("R_1", [pr]))
 
         _, kwargs = endpoint.graphql.call_args
@@ -480,9 +478,7 @@ class TestCreatePullRequests:
         )
         gh = make_github(endpoint, fork_owner="owner")
 
-        pr = PrInfo(
-            baseRef="main", headRef="feat1", baseRefOid=None, headRefOid=None, body="b", title="t"
-        )
+        pr = PrInfo(baseRef="main", headRef="feat1", headRefOid=None, body="b", title="t")
         asyncio.run(gh.create_pull_requests("R_1", [pr]))
 
         _, kwargs = endpoint.graphql.call_args
@@ -498,7 +494,6 @@ class TestCreatePullRequests:
         pr = PrInfo(
             baseRef="main",
             headRef="feat1",
-            baseRefOid=None,
             headRefOid=None,
             body="b",
             title="t",
@@ -537,9 +532,7 @@ class TestCreatePullRequests:
         endpoint.graphql = mock_graphql
         gh = make_github(endpoint)
 
-        pr = PrInfo(
-            baseRef="main", headRef="feat1", baseRefOid=None, headRefOid=None, body="b", title="t"
-        )
+        pr = PrInfo(baseRef="main", headRef="feat1", headRefOid=None, body="b", title="t")
         asyncio.run(gh.create_pull_requests("R_1", [pr]))
 
         assert pr.id == "PR_existing"
@@ -565,7 +558,6 @@ class TestCreatePullRequests:
             PrInfo(
                 baseRef="main",
                 headRef=f"f{i}",
-                baseRefOid=None,
                 headRefOid=None,
                 body="b",
                 title=f"t{i}",

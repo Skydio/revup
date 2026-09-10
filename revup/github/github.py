@@ -29,23 +29,9 @@ PR_FRAGMENT = f"""
                 body
                 title
                 isDraft
-                baseCommit: commits(first: 1) {{
-                    nodes {{
-                        commit {{
-                            parents (first: 1) {{
-                                nodes {{
-                                    oid
-                                }}
-                            }}
-                        }}
-                    }}
-                }}
-                headCommit: commits(last: 1) {{
-                    nodes {{
-                        commit {{
-                            oid
-                        }}
-                    }}
+                headRefOid
+                commits {{
+                    totalCount
                 }}
                 reviewRequests (first: 25) {{
                     nodes {{
@@ -245,17 +231,6 @@ class GithubQuery(GraphqlQuery):
                     assignees.add(user["login"])
                     assignee_ids.add(user["id"])
 
-                headRefOid = (
-                    this_node["headCommit"]["nodes"][0]["commit"]["oid"]
-                    if this_node["headCommit"]["nodes"]
-                    else None
-                )
-                baseRefOid = (
-                    this_node["baseCommit"]["nodes"][0]["commit"]["parents"]["nodes"][0]["oid"]
-                    if this_node["baseCommit"]["nodes"]
-                    else None
-                )
-
                 comments = []
                 for c in this_node["comments"]["nodes"]:
                     comments.append(PrComment(c["body"], c["id"]))
@@ -280,8 +255,8 @@ class GithubQuery(GraphqlQuery):
                         url=this_node["url"],
                         baseRef=this_node["baseRefName"],
                         headRef=branch_name,
-                        baseRefOid=baseRefOid,
-                        headRefOid=headRefOid,
+                        headRefOid=this_node["headRefOid"],
+                        numCommits=this_node["commits"]["totalCount"],
                         body=this_node["body"],
                         title=this_node["title"],
                         reviewers=reviewers,
