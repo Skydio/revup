@@ -511,26 +511,48 @@ class Git:
         Return the branch(es) with the shortest distance from the commit to fork-point
         """
         branches = await self.find_remote_branches(commit, limit_to_base_branches, True)
-        candidates: List[Tuple[int, str]] = []
 
         if len(branches) == 1:
             return branches
 
-        for b in branches:
-            if not allow_self and b == commit:
-                continue
+        if not allow_self:
+            branches = [b for b in branches if b != commit]
+        if not branches:
+            return []
 
-            # If we have valid candidates, we can stop iterating once the distance is greater
-            # than the current best distance.
-            dist = await self.distance_to_fork_point(
-                commit, b, candidates[0][0] if candidates else 0
-            )
+        # Find the minimum fork-point distance and its fork commit in a single call:
+        # walking commit's first-parent chain, keep commits reachable from no candidate.
+        # The deepest kept commit's parent is the fork point with the nearest branch, and
+        # the number kept is that (minimum) distance.
+        unique = [
+            c
+            for c in (
+                await self.git_stdout(
+                    "rev-list",
+                    "--first-parent",
+                    "--exclude-first-parent-only",
+                    commit,
+                    *(f"^{b}" for b in branches),
+                    "--reverse",
+                )
+            ).split("\n")
+            if c
+        ]
+        best = len(unique)
+        fork_point = f"{unique[0]}~" if unique else commit
 
-            if len(candidates) == 0 or candidates[0][0] > dist:
-                candidates = [(dist, b)]
-            elif candidates[0][0] == dist:
-                candidates.append((dist, b))
-        return [c[1] for c in candidates]
+        # Branches tied at the minimum distance all contain the fork commit. --contains
+        # tests full ancestry, so this is a superset; verify each with the exact
+        # first-parent distance to drop branches that merely contain it off-chain.
+        args = ["--format", "%(refname)", "--contains", fork_point]
+        args.extend(f"refs/remotes/{b}" for b in branches)
+        superset = []
+        for ref in (await self.git_stdout("for-each-ref", *args)).split("\n"):
+            result = re.match(r"^refs/remotes/(?P<branch>.*)$", ref)
+            if result is not None:
+                superset.append(result.group("branch"))
+        dists = await asyncio.gather(*(self.distance_to_fork_point(commit, b) for b in superset))
+        return [b for b, dist in zip(superset, dists) if dist == best]
 
     async def get_best_base_branch(
         self,
