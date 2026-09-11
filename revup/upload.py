@@ -45,10 +45,11 @@ async def run(
         forge,
         args.head,
     )
+    trim_tags = topic_stack.TrimTags(args.trim_tags)
     with get_console().status("Finding topics…"):
         await topics.populate_topics(
             auto_topic=args.auto_topic,
-            trim_tags=args.trim_tags,
+            trim_tags=trim_tags,
             raise_on_invalid=True,
         )
         await topics.populate_reviews(
@@ -81,7 +82,7 @@ async def run(
         return
 
     with get_console().status("Creating commits…"):
-        await topics.create_commits(args.trim_tags, args.skip_empty_first_commit)
+        await topics.create_commits(trim_tags, args.skip_empty_first_commit)
 
     yield UploadPhase.COMMITS_CREATED, topics
 

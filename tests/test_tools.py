@@ -1,5 +1,6 @@
 import asyncio
 import builtins
+import configparser
 import io
 import sys
 from unittest import mock
@@ -42,3 +43,25 @@ def test_help_menu(mocker):
         mock_revup(["upload", "-h"], [])
     help_action.assert_called()
     upload_main.assert_not_called()
+
+
+def test_trim_tags_values():
+    revup_parser, all_parsers = revup.build_parser()
+    assert revup_parser.parse_args(["upload"]).trim_tags == "false"
+    assert revup_parser.parse_args(["upload", "--trim-tags=true"]).trim_tags == "true"
+    assert (
+        revup_parser.parse_args(["upload", "--trim-tags=nonidentifying"]).trim_tags
+        == "nonidentifying"
+    )
+    with pytest.raises(SystemExit):
+        revup_parser.parse_args(["upload", "--trim-tags=bogus"])
+    # The value is mandatory, so a topic name can never be mistaken for it
+    with pytest.raises(SystemExit):
+        revup_parser.parse_args(["upload", "--trim-tags"])
+
+    # Config accepts the same values
+    upload_parser = next(p for p in all_parsers if p.get_command() == "upload")
+    config = configparser.ConfigParser()
+    config.read_string("[upload]\ntrim_tags = nonidentifying\n")
+    upload_parser.set_defaults_from_config(config)
+    assert upload_parser.parse_args([]).trim_tags == "nonidentifying"

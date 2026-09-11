@@ -13,6 +13,7 @@ from revup.topic_stack import (
     PrStatus,
     PushStatus,
     TopicStack,
+    TrimTags,
     format_remote_branch,
 )
 
@@ -30,7 +31,7 @@ def make_upload_args(**kwargs):
         "update_pr_body": True,
         "create_local_branches": False,
         "review_graph": True,
-        "trim_tags": False,
+        "trim_tags": TrimTags.NONE.value,
         "patchsets": True,
         "self_authored_only": False,
         "labels": None,
@@ -67,7 +68,7 @@ async def run_upload_pipeline(env, **kwargs):
     )
     await topics.populate_topics(
         auto_topic=args.auto_topic,
-        trim_tags=args.trim_tags,
+        trim_tags=TrimTags(args.trim_tags),
         raise_on_invalid=True,
     )
     await topics.populate_reviews(
@@ -82,7 +83,7 @@ async def run_upload_pipeline(env, **kwargs):
         args.uploader if args.uploader else env.git_ctx.author,
         branch_format=args.branch_format,
     )
-    await topics.create_commits(args.trim_tags, args.skip_empty_first_commit)
+    await topics.create_commits(TrimTags(args.trim_tags), args.skip_empty_first_commit)
     return topics
 
 
@@ -336,7 +337,7 @@ class TestUploadTrimTags:
                 {"a.txt": "a"},
             )
 
-            topics = await run_upload_pipeline(env, trim_tags=True)
+            topics = await run_upload_pipeline(env, trim_tags=TrimTags.ALL.value)
 
             review = topics.topics["alpha"].reviews["origin/main"]
             msg = await get_commit_msg_at_ref(env, review.new_commits[-1])
@@ -353,9 +354,42 @@ class TestUploadTrimTags:
             await env.commit("feat\n\nTopic: alpha\nReviewer: user1", {"a.txt": "a"})
             original_hash = await env.get_commit_hash()
 
-            topics = await run_upload_pipeline(env, trim_tags=True)
+            topics = await run_upload_pipeline(env, trim_tags=TrimTags.ALL.value)
             review = topics.topics["alpha"].reviews["origin/main"]
             assert review.new_commits[-1] != original_hash
+
+    @async_test
+    async def test_trim_nonidentifying_keeps_identifying_tags(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            await env.commit(
+                "feat title\n\nBody text\n\nTopic: alpha\nRelative:\nBranch: main\n"
+                "Reviewer: user1\nLabel: bug\nAssignee: user2\nUpdate-Pr-Body: false\nDraft: true",
+                {"a.txt": "a"},
+            )
+
+            topics = await run_upload_pipeline(env, trim_tags=TrimTags.NONIDENTIFYING.value)
+
+            topic = topics.topics["alpha"]
+            msg = await get_commit_msg_at_ref(env, topic.reviews["origin/main"].new_commits[-1])
+            assert "feat title" in msg
+            assert "Body text" in msg
+            assert "Topic: alpha" in msg
+            assert "Branch: main" in msg
+            for trimmed in (
+                "Relative:",
+                "Reviewer:",
+                "Label:",
+                "Assignee:",
+                "Update-Pr-Body:",
+                "Draft:",
+            ):
+                assert trimmed not in msg
+
+            # Trimmed tags still take effect on this upload
+            assert topic.tags["reviewer"] == {"user1"}
+            assert topic.tags["label"] == {"bug"}
+            assert topic.tags["assignee"] == {"user2"}
 
 
 class TestUploadTagParsing:
@@ -1413,7 +1447,7 @@ def make_forge_upload_args(**kwargs):
         "update_pr_body": True,
         "create_local_branches": False,
         "review_graph": True,
-        "trim_tags": False,
+        "trim_tags": TrimTags.NONE.value,
         "patchsets": False,
         "self_authored_only": False,
         "labels": None,
