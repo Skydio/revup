@@ -192,6 +192,9 @@ class Review:
     # Whether a PR is a draft
     is_draft: bool = False
 
+    # Position of this review in its relative chain, where the first review is 1
+    depth: int = 1
+
     # Comment indexes identify a matching comment for the given feature to update.
     # If greater than len(pr_info.comments), identifies a new comment.
     review_graph_index: Optional[int] = None
@@ -636,7 +639,9 @@ class TopicStack:
                 if name not in self.topics:
                     logging.warning(f"Couldn't find any topic named {name}")
 
-    async def populate_relative_reviews(self, uploader: str, branch_format: str) -> None:
+    async def populate_relative_reviews(
+        self, uploader: str, branch_format: str, deep_stack_draft: int = 0
+    ) -> None:
         for name, topic in self.topological_topics():
             if topic.relative_topic:
                 if len(topic.tags[TAG_BRANCH]) == 0:
@@ -716,6 +721,7 @@ class TopicStack:
                 if topic.relative_topic is not None:
                     topic.relative_topic.reviews[branch].children.append(review)
 
+                    review.depth = topic.relative_topic.reviews[branch].depth + 1
                     review.remote_base = topic.relative_topic.reviews[branch].remote_head
                     # Base ref is empty since it doesn't exist until create_commits()
                 else:
@@ -731,7 +737,11 @@ class TopicStack:
 
                 topic.reviews[branch] = review
 
-                review.is_draft = get_bool_tag(topic.tags, TAG_DRAFT)
+                review.is_draft = get_bool_tag(
+                    topic.tags,
+                    TAG_DRAFT,
+                    0 < deep_stack_draft <= review.depth,
+                )
 
     async def mark_rebases(self, skip_rebase: bool) -> None:
         """

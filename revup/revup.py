@@ -198,6 +198,7 @@ def build_parser() -> Tuple[RevupArgParser, List[RevupArgParser]]:
     )
     upload_parser.add_argument("--skip-empty-first-commit", action="store_true")
     upload_parser.add_argument("--draft-on-create-only", action="store_true")
+    upload_parser.add_argument("--deep-stack-draft", type=int, default=0)
     upload_parser.add_argument("--head", default="HEAD")
 
     restack_parser.add_argument("--topicless-last", "-t", action="store_true")
