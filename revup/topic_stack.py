@@ -1267,6 +1267,7 @@ class TopicStack:
         update_pr_body_arg: bool,
         force_reviewers: bool = False,
         pr_body_source: PrBodySource = PrBodySource.FIRST_COMMIT,
+        draft_on_create_only: bool = False,
     ) -> None:
         """
         Populate information necessary to do PR creation / update on the forge.
@@ -1391,7 +1392,10 @@ class TopicStack:
                     review.pr_update.body = body
                 if update_pr_body and review.pr_info.title != title:
                     review.pr_update.title = title
-                if review.pr_info.is_draft != review.is_draft:
+                if draft_on_create_only:
+                    # The forge's draft status wins, since the user may have changed it there
+                    review.is_draft = review.pr_info.is_draft
+                elif review.pr_info.is_draft != review.is_draft:
                     review.pr_update.is_draft = review.is_draft
                 review.pr_update.label_ids = label_ids
                 review.pr_update.reviewer_ids = reviewer_ids
