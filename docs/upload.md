@@ -10,6 +10,7 @@ revup upload - Modify or create code reviews.
 `[--status] [--no-update-pr-body] [--review-graph]`
 `[--trim-tags] [--create-local-branches] [--patchsets] [--auto-add-users=<o>]`
 `[--force-reviewers] [--pr-body-source=<src>] [--skip-empty-first-commit]`
+`[--draft-on-create-only]`
 `[--labels=<labels>] [<topics>]`
 
 # DESCRIPTION
@@ -72,7 +73,8 @@ name in github exactly. If a label cannot be found a warning is printed.
 
 **Draft:**
 : Accepts "true" or "false" and marks or unmarks the PR as a draft. PRs are
-not drafts if this tag is omitted.
+not drafts if this tag is omitted. See --draft-on-create-only to only apply
+this tag when the PR is created.
 
 **Uploader:**
 : Optionally specifies a custom uploader name that will be used instead of the
@@ -235,6 +237,11 @@ If "a2r", add users from the Assignees tag as reviewers. If "both", do both of t
 : Exclude the first commit of a topic when creating branches if it is empty. This allows
 using an empty commit purely for PR title and body text without that commit appearing in
 the merged history.
+
+**--draft-on-create-only**
+: Only use the "Draft:" tag to decide draft status when creating a PR, and never
+change it afterwards. This allows marking a PR ready for review in github without
+revup turning it back into a draft.
 
 **--head**
 : The name or commit of the branch to be uploaded. If not specified, defaults to HEAD.
