@@ -1110,6 +1110,20 @@ class TopicStack:
         if orphaned_updates:
             await self.forge.update_pull_requests(orphaned_updates)
 
+    def get_pushed_ref_args(self) -> List[str]:
+        """
+        Return "baseSHA:headSHA:baserefname:headrefname" for each ref that will be pushed.
+        """
+        ret = []
+        for _, _, _, review in self.all_reviews_iter():
+            if review.push_status != PushStatus.PUSHED or review.status == PrStatus.MERGED:
+                continue
+            ret.append(
+                f"{review.base_ref}:{review.new_commits[-1]}:"
+                f"{review.remote_base}:{review.remote_head}"
+            )
+        return ret
+
     async def push_git_refs(self, uploader: str, create_local_branches: bool) -> None:
         """
         Push all refs to their branch on the remote.

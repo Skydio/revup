@@ -1,7 +1,9 @@
 import argparse
 import enum
+import os
+import shlex
 import subprocess
-from typing import AsyncGenerator, Tuple
+from typing import AsyncGenerator, List, Tuple
 
 from rich import get_console
 
@@ -17,6 +19,34 @@ class UploadPhase(enum.Enum):
     READY_TO_PUSH = "ready_to_push"
     PUSHED = "pushed"
     PRS_UPDATED = "prs_updated"
+
+
+def run_pre_upload(pre_upload: str, ref_args: List[str], repo_root: str) -> None:
+    """
+    Run the pre-upload command with an argument for each ref that will be pushed. The program is
+    taken from the repo root if it exists there, otherwise from PATH.
+    """
+    command = shlex.split(pre_upload) + ref_args
+    in_repo_root = os.path.join(repo_root, command[0])
+    if os.path.isfile(in_repo_root):
+        command[0] = in_repo_root
+
+    try:
+        result = subprocess.run(
+            command,
+            cwd=repo_root,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        raise RevupShellException(f"Couldn't run pre-upload command: {exc}") from exc
+    if result.returncode != 0:
+        raise RevupShellException(
+            f"Pre-upload command failed:\n{result.stdout}\n"
+            "You can run with --no-verify to ignore this."
+        )
 
 
 async def main(
@@ -102,19 +132,9 @@ async def run(
         if git_ctx.sh.wait_for_confirmation():
             return
 
-    if args.pre_upload:
+    if args.pre_upload and not args.no_verify:
         with get_console().status("Running pre-upload command"):
-            result = subprocess.run(
-                args.pre_upload,
-                shell=True,
-                cwd=git_ctx.sh.cwd,
-                check=False,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                encoding="utf-8",
-            )
-            if result.returncode != 0:
-                raise RevupShellException(f"Pre-upload command failed:\n{result.stdout}")
+            run_pre_upload(args.pre_upload, topics.get_pushed_ref_args(), git_ctx.repo_root)
 
     yield UploadPhase.READY_TO_PUSH, topics
 

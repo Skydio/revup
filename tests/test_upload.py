@@ -1,4 +1,5 @@
 import argparse
+import os
 import shutil
 import tempfile
 
@@ -6,7 +7,7 @@ import pytest
 from fake_forge import FakeForge
 from git_env import GitTestEnvironment, async_test
 
-from revup.core_types import RevupConflictException, RevupUsageException
+from revup.core_types import RevupConflictException, RevupShellException, RevupUsageException
 from revup.forge import PrInfo
 from revup.topic_stack import (
     PrBodySource,
@@ -45,6 +46,7 @@ def make_upload_args(**kwargs):
         "skip_empty_first_commit": False,
         "verbose": False,
         "deep_stack_draft": 0,
+        "no_verify": False,
     }
     defaults.update(kwargs)
     return argparse.Namespace(**defaults)
@@ -1483,6 +1485,7 @@ def make_forge_upload_args(**kwargs):
         "pr_body_source": PrBodySource.FIRST_COMMIT,
         "draft_on_create_only": False,
         "deep_stack_draft": 0,
+        "no_verify": False,
     }
     defaults.update(kwargs)
     return argparse.Namespace(**defaults)
@@ -2266,3 +2269,68 @@ class TestReorderingWorkaround:
             assert found_empty, "Expected at least one PR with 0 commits (empty diff)"
 
             shutil.rmtree(bare_dir, ignore_errors=True)
+
+
+class TestForgePreUpload:
+    async def write_hook(self, env, body):
+        await env.write_file("hook.sh", f"#!/bin/sh\n{body}\n")
+        os.chmod(env.tmp_dir / "hook.sh", 0o755)
+
+    @async_test
+    async def test_pre_upload_gets_ref_args_and_resolves_from_repo_root(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            # Named without a path, so it can only be found by looking in the repo root
+            await self.write_hook(env, 'printf "%s\\n" "$@" > hook_args.txt')
+            await env.commit("first\n\nTopic: first", {"a.txt": "a"})
+            await env.commit("second\n\nTopic: second\nRelative: first", {"b.txt": "b"})
+
+            topics = await full_upload_pipeline(env, forge, pre_upload="hook.sh")
+
+            first = topics.topics["first"].reviews["origin/main"]
+            second = topics.topics["second"].reviews["origin/main"]
+            assert (await env.read_file("hook_args.txt")).split() == [
+                f"{first.base_ref}:{first.new_commits[-1]}:main:{first.remote_head}",
+                f"{second.base_ref}:{second.new_commits[-1]}:"
+                f"{first.remote_head}:{second.remote_head}",
+            ]
+            # The base of a relative review is the head of the review it's relative to
+            assert second.base_ref == first.new_commits[-1]
+
+    @async_test
+    async def test_pre_upload_failure_suggests_no_verify(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await self.write_hook(env, "exit 1")
+            await env.commit("feat\n\nTopic: alpha", {"a.txt": "a"})
+
+            with pytest.raises(RevupShellException) as exc:
+                await full_upload_pipeline(env, forge, pre_upload="hook.sh")
+
+            assert "--no-verify" in str(exc.value)
+            assert len(forge.created_prs) == 0
+
+    @async_test
+    async def test_missing_pre_upload_command_raises(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.commit("feat\n\nTopic: alpha", {"a.txt": "a"})
+
+            with pytest.raises(RevupShellException):
+                await full_upload_pipeline(env, forge, pre_upload="revup-nonexistent-command")
+
+    @async_test
+    async def test_no_verify_skips_the_command(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await self.write_hook(env, "touch hook_ran.txt\nexit 1")
+            await env.commit("feat\n\nTopic: alpha", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge, pre_upload="hook.sh", no_verify=True)
+
+            assert not (env.tmp_dir / "hook_ran.txt").exists()
+            assert len(forge.created_prs) == 1
