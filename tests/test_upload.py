@@ -467,18 +467,33 @@ class TestUploadBranchFormat:
                 await run_upload_pipeline(env)
 
 
-class TestUploadDraftLabel:
+class TestUploadDraftTag:
     @async_test
-    async def test_draft_label_marks_review_as_draft(self):
+    async def test_draft_tag_marks_review_as_draft(self):
         async with GitTestEnvironment() as env:
             await setup_repo(env)
-            await env.commit("feat\n\nTopic: alpha\nLabel: draft", {"a.txt": "a"})
+            await env.commit("feat\n\nTopic: alpha\nDraft: TRUE", {"a.txt": "a"})
 
             topics = await run_upload_pipeline(env)
-            review = topics.topics["alpha"].reviews["origin/main"]
-            assert review.is_draft is True
-            # "draft" is removed from the label set
-            assert "draft" not in topics.topics["alpha"].tags["label"]
+            assert topics.topics["alpha"].reviews["origin/main"].is_draft is True
+
+    @async_test
+    async def test_draft_false_doesnt_mark_review_as_draft(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            await env.commit("feat\n\nTopic: alpha\nDraft: false", {"a.txt": "a"})
+
+            topics = await run_upload_pipeline(env)
+            assert topics.topics["alpha"].reviews["origin/main"].is_draft is False
+
+    @async_test
+    async def test_invalid_draft_tag_raises(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            await env.commit("feat\n\nTopic: alpha\nDraft: maybe", {"a.txt": "a"})
+
+            with pytest.raises(RevupUsageException):
+                await run_upload_pipeline(env)
 
 
 class TestUploadAutoAddUsers:
@@ -1705,11 +1720,11 @@ class TestForgeLabels:
             assert "label_main" in update.label_ids
 
     @async_test
-    async def test_draft_label_creates_draft_pr(self):
+    async def test_draft_tag_creates_draft_pr(self):
         async with GitTestEnvironment() as env:
             await setup_repo(env)
             forge = FakeForge()
-            await env.commit("feat\n\nTopic: alpha\nLabel: draft", {"a.txt": "a"})
+            await env.commit("feat\n\nTopic: alpha\nDraft: true", {"a.txt": "a"})
 
             await full_upload_pipeline(env, forge)
 

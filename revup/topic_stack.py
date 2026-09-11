@@ -69,6 +69,7 @@ TAG_RELATIVE_BRANCH = "relative-branch"
 TAG_UPLOADER = "uploader"
 TAG_UPDATE_PR_BODY = "update-pr-body"
 TAG_BRANCH_FORMAT = "branch-format"
+TAG_DRAFT = "draft"
 VALID_TAGS = {
     TAG_BRANCH,
     TAG_LABEL,
@@ -80,12 +81,26 @@ VALID_TAGS = {
     TAG_UPLOADER,
     TAG_UPDATE_PR_BODY,
     TAG_BRANCH_FORMAT,
+    TAG_DRAFT,
 }
 
 RE_COMMIT_LABEL = re.compile(r"^(?P<label1>[a-zA-Z\-_0-9]+):.*|^\[(?P<label2>[a-zA-Z\-_0-9]+)\].*")
 
 PATCHSETS_FIRST_LINE = "| # | head | base | diff | date | summary |\r\n| - | - | - | - | - | - |"
 REVIEW_GRAPH_FIRST_LINE = "Reviews in this chain:\r\n"
+
+
+def get_bool_tag(tags: Dict[str, Set[str]], tag: str, default: bool = False) -> bool:
+    """
+    Return the value of a tag that accepts the same boolean values as config options,
+    or the default if the tag isn't given.
+    """
+    if tag not in tags:
+        return default
+    value = min(tags[tag]).lower()
+    if len(tags[tag]) > 1 or value not in ("true", "false"):
+        raise RevupUsageException(f"Invalid tags for {tag}: {tags[tag]}")
+    return value == "true"
 
 
 def add_tags(original: Dict[str, Set[str]], new: Dict[str, Set[str]]) -> None:
@@ -528,13 +543,9 @@ class TopicStack:
             if len(topic.tags[TAG_UPLOADER]) > 1:
                 raise RevupUsageException(f"Can't specify more than one uploader for topic {name}!")
 
-            if TAG_UPDATE_PR_BODY in topic.tags:
-                if len(topic.tags[TAG_UPDATE_PR_BODY]) > 1 or min(
-                    topic.tags[TAG_UPDATE_PR_BODY]
-                ).lower() not in {"true", "false"}:
-                    raise RevupUsageException(
-                        f"Invalid tags for update-pr-body: {topic.tags[TAG_UPDATE_PR_BODY]}"
-                    )
+            # Validate boolean tags now so that errors are reported before uploading
+            for bool_tag in (TAG_UPDATE_PR_BODY, TAG_DRAFT):
+                get_bool_tag(topic.tags, bool_tag)
 
             if TAG_BRANCH_FORMAT in topic.tags:
                 if (
@@ -720,10 +731,7 @@ class TopicStack:
 
                 topic.reviews[branch] = review
 
-                review.is_draft = "draft" in topic.tags[TAG_LABEL]
-
-            # Don't add draft as a label since its instead used to mark a pr as a draft
-            topic.tags[TAG_LABEL].discard("draft")
+                review.is_draft = get_bool_tag(topic.tags, TAG_DRAFT)
 
     async def mark_rebases(self, skip_rebase: bool) -> None:
         """
@@ -1375,10 +1383,7 @@ class TopicStack:
                         assignee_logins -= removed
                         assignee_ids -= review.pr_info.removed_assignee_ids
 
-                if TAG_UPDATE_PR_BODY in topic.tags:
-                    update_pr_body = min(topic.tags[TAG_UPDATE_PR_BODY]).lower() == "true"
-                else:
-                    update_pr_body = update_pr_body_arg
+                update_pr_body = get_bool_tag(topic.tags, TAG_UPDATE_PR_BODY, update_pr_body_arg)
 
                 if review.pr_info.baseRef != review.remote_base:
                     review.pr_update.baseRef = review.remote_base

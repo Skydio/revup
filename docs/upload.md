@@ -68,9 +68,11 @@ for reviewers, except that Github does not support teams as assignees so
 
 **Labels:**
 : Specifies labels that will be added on github. Labels must match the label
-name in github exactly. If a label cannot be found a warning is printed. The
-label "draft" is special and instead of showing up in labels, will cause the
-PR to either be marked or unmarked as a draft.
+name in github exactly. If a label cannot be found a warning is printed.
+
+**Draft:**
+: Accepts "true" or "false" and marks or unmarks the PR as a draft. PRs are
+not drafts if this tag is omitted.
 
 **Uploader:**
 : Optionally specifies a custom uploader name that will be used instead of the
