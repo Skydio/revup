@@ -14,6 +14,7 @@ from revup.topic_stack import (
     TAG_ASSIGNEE,
     TAG_BRANCH,
     TAG_BRANCH_FORMAT,
+    TAG_DRAFT,
     TAG_LABEL,
     TAG_RELATIVE,
     TAG_RELATIVE_BRANCH,
@@ -36,6 +37,7 @@ TAG_ORDER = [
     TAG_UPLOADER,
     TAG_UPDATE_PR_BODY,
     TAG_BRANCH_FORMAT,
+    TAG_DRAFT,
 ]
 
 

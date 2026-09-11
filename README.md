@@ -189,13 +189,14 @@ Revup can also add reviewers, assignees, and labels to pull requests. Add the ap
 ```
 Reviewers: alice, bob, myorg/backend-team
 Assignees: eve
-Labels: bug, feature, draft
+Labels: bug, feature
+Draft: true
 ```
 
 Github usernames can be abbreviated and will match the shortest name with the given prefix.
 Teams are specified as `org/team-slug` and can be used as reviewers (Github does not support teams as assignees).
 
-Labels must match exactly. The `draft` label is special and will make a pull request a draft if present and unmake draft if removed.
+Labels must match exactly. `Draft: true` makes a pull request a draft, and `Draft: false` or removing the tag unmakes it.
 
 ## Working on other branches
 
