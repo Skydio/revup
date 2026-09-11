@@ -1429,6 +1429,7 @@ def make_forge_upload_args(**kwargs):
         "verbose": False,
         "force_reviewers": False,
         "pr_body_source": PrBodySource.FIRST_COMMIT,
+        "draft_on_create_only": False,
     }
     defaults.update(kwargs)
     return argparse.Namespace(**defaults)
@@ -1730,6 +1731,44 @@ class TestForgeLabels:
 
             pr = forge.created_prs[0]
             assert pr.is_draft is True
+
+    @async_test
+    async def test_draft_tag_redrafts_undrafted_pr(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.commit("feat\n\nTopic: alpha\nDraft: true", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge)
+
+            # Simulate the user marking the pr ready for review in github
+            pr = list(forge.prs.values())[0]
+            pr.is_draft = False
+
+            topics = await full_upload_pipeline(env, forge)
+
+            assert topics.topics["alpha"].reviews["origin/main"].pr_update.is_draft is True
+            assert pr.is_draft is True
+
+    @async_test
+    async def test_draft_on_create_only_keeps_pr_undrafted(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.commit("feat\n\nTopic: alpha\nDraft: true", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge, draft_on_create_only=True)
+            assert forge.created_prs[0].is_draft is True
+
+            pr = list(forge.prs.values())[0]
+            pr.is_draft = False
+
+            topics = await full_upload_pipeline(env, forge, draft_on_create_only=True)
+
+            review = topics.topics["alpha"].reviews["origin/main"]
+            assert review.pr_update.is_draft is None
+            assert review.is_draft is False
+            assert pr.is_draft is False
 
 
 class TestForgeReviewGraph:
