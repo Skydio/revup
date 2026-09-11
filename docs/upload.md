@@ -10,7 +10,7 @@ revup upload - Modify or create code reviews.
 `[--status] [--no-update-pr-body] [--review-graph]`
 `[--trim-tags] [--create-local-branches] [--patchsets] [--auto-add-users=<o>]`
 `[--force-reviewers] [--pr-body-source=<src>] [--skip-empty-first-commit]`
-`[--draft-on-create-only] [--deep-stack-draft=<depth>]`
+`[--draft-on-create-only] [--deep-stack-draft=<depth>] [--no-verify]`
 `[--labels=<labels>] [<topics>]`
 
 # DESCRIPTION
@@ -164,7 +164,14 @@ printing topic info before the upload.
 **--pre-upload, -p**
 : A shell command that will be run before uploading any reviews.
 Upload will fail with error status if this command fails. Can be
-customized to ensure lint checks pass before uploading.
+customized to ensure lint checks pass before uploading. The command is split
+into arguments and run directly instead of through a shell, from the repo root.
+The program is taken from the repo root if it exists there, otherwise from PATH.
+One argument formatted as `baseSHA:headSHA:baserefname:headrefname` is appended
+for each branch that is about to be pushed.
+
+**--no-verify**
+: Don't run the pre-upload command at all.
 
 **--dry-run, -d**
 : Performs all steps of a normal upload except those that actually involve

@@ -187,6 +187,7 @@ def build_parser() -> Tuple[RevupArgParser, List[RevupArgParser]]:
         default="user+branch",
     )
     upload_parser.add_argument("--pre-upload", "-p")
+    upload_parser.add_argument("--no-verify", action="store_true")
     upload_parser.add_argument("--relative-chain", "-c", action="store_true")
     upload_parser.add_argument("--auto-topic", "-a", action="store_true")
     upload_parser.add_argument("--force-reviewers", action="store_true")
