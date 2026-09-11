@@ -83,11 +83,65 @@ VALID_TAGS = {
     TAG_BRANCH_FORMAT,
     TAG_DRAFT,
 }
+# Tags that the forge remembers once uploaded, so they don't have to stay in the commit
+# message. All other tags determine which pr a commit belongs to, and so must be kept in
+# order for the same pr to be made if the commit is cherry-picked.
+NONIDENTIFYING_TAGS = {
+    TAG_LABEL,
+    TAG_REVIEWER,
+    TAG_ASSIGNEE,
+    TAG_UPDATE_PR_BODY,
+    TAG_DRAFT,
+}
 
 RE_COMMIT_LABEL = re.compile(r"^(?P<label1>[a-zA-Z\-_0-9]+):.*|^\[(?P<label2>[a-zA-Z\-_0-9]+)\].*")
 
 PATCHSETS_FIRST_LINE = "| # | head | base | diff | date | summary |\r\n| - | - | - | - | - | - |"
 REVIEW_GRAPH_FIRST_LINE = "Reviews in this chain:\r\n"
+
+
+def match_commit_tag(line: str) -> Optional[Tuple[str, Set[str]]]:
+    """
+    Return the tag name and values of a line containing a valid tag, or None if the line
+    isn't one.
+    """
+    m = RE_TAGS.match(line)
+    if m is None:
+        return None
+    tag = m.group("tagname").lower().strip()
+    if (
+        not tag.startswith(TAG_RELATIVE)
+        and not tag.startswith(TAG_RELATIVE_BRANCH)
+        and not tag.startswith(TAG_TOPIC)
+        and not tag.startswith(TAG_UPLOADER)
+    ):
+        # That's right, plurals don't even have to be grammatically correct
+        if tag.endswith("ees"):
+            tag = tag[:-1]
+        elif tag.endswith("es"):
+            tag = tag[:-2]
+        elif tag.endswith("s"):
+            tag = tag[:-1]
+    if tag not in VALID_TAGS:
+        return None
+    val = set(s.strip() for s in m.group("tagvalue").split(","))
+    val.discard("")  # Discards any whitespace only values, since it was stripped prior
+    return tag, val
+
+
+def trim_nonidentifying_tags(commit_msg: str) -> str:
+    """
+    Return a version of the message with nonidentifying and valueless tags removed.
+    """
+    ret = []
+    for ln in commit_msg.split("\n"):
+        matched = match_commit_tag(ln)
+        if matched is not None:
+            tag, val = matched
+            if tag in NONIDENTIFYING_TAGS or not val:
+                continue
+        ret.append(ln)
+    return "\n".join(ret).strip()
 
 
 def get_bool_tag(tags: Dict[str, Set[str]], tag: str, default: bool = False) -> bool:
@@ -122,6 +176,17 @@ class PrBodySource(Enum):
     FIRST_COMMIT = "first-commit"
     SQUASHED = "squashed"
     TEMPLATE = "template"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+# Which tags to remove from commit messages before pushing them.
+class TrimTags(Enum):
+    NONE = "false"
+    # Trims NONIDENTIFYING_TAGS as well as tags with no value
+    NONIDENTIFYING = "nonidentifying"
+    ALL = "true"
 
     def __str__(self) -> str:
         return self.value
@@ -323,27 +388,9 @@ class TopicStack:
         ret = defaultdict(set)
         trimmed_msg = []
         for ln in commit_msg.split("\n"):
-            m = RE_TAGS.match(ln)
-            if m is None:
-                trimmed_msg.append(ln)
-                continue
-            tag = m.group("tagname").lower().strip()
-            val = set(s.strip() for s in m.group("tagvalue").split(","))
-            if (
-                not tag.startswith(TAG_RELATIVE)
-                and not tag.startswith(TAG_RELATIVE_BRANCH)
-                and not tag.startswith(TAG_TOPIC)
-                and not tag.startswith(TAG_UPLOADER)
-            ):
-                # That's right, plurals don't even have to be grammatically correct
-                if tag.endswith("ees"):
-                    tag = tag[:-1]
-                elif tag.endswith("es"):
-                    tag = tag[:-2]
-                elif tag.endswith("s"):
-                    tag = tag[:-1]
-            val.discard("")  # Discards any whitespace only values, since it was stripped prior
-            if tag in VALID_TAGS:
+            matched = match_commit_tag(ln)
+            if matched is not None:
+                tag, val = matched
                 if tag in (TAG_BRANCH, TAG_RELATIVE_BRANCH):
                     val = set(self.git_ctx.ensure_branch_prefix(b) for b in val)
                 ret[tag].update(val)
@@ -426,7 +473,7 @@ class TopicStack:
     async def populate_topics(
         self,
         auto_topic: bool = False,
-        trim_tags: bool = False,
+        trim_tags: TrimTags = TrimTags.NONE,
         raise_on_invalid: bool = False,
     ) -> None:
         """
@@ -490,8 +537,10 @@ class TopicStack:
                         f"Can't specify more than one topic for a commit!\n\n{c.commit_msg}"
                     )
             else:
-                if trim_tags:
+                if trim_tags == TrimTags.ALL:
                     c.commit_msg = trimmed_msg
+                elif trim_tags == TrimTags.NONIDENTIFYING:
+                    c.commit_msg = trim_nonidentifying_tags(c.commit_msg)
                 name = min(parsed_tags[TAG_TOPIC])
                 if raise_on_invalid and not RE_BRANCH_ALLOWED.match(name):
                     raise RevupUsageException(f"Invalid characters in topic name '{name}'")
@@ -953,7 +1002,9 @@ class TopicStack:
                     else:
                         break
 
-    async def create_commits(self, trim_tags: bool, skip_empty_first_commit: bool = False) -> None:
+    async def create_commits(
+        self, trim_tags: TrimTags, skip_empty_first_commit: bool = False
+    ) -> None:
         """
         Populate new_commits for all reviews by cherry-picking to the base ref if necessary.
         """
@@ -982,7 +1033,7 @@ class TopicStack:
                     and commit.tree == await self.git_ctx.to_tree(commit.parents[0])
                 ):
                     continue
-                if commit.parents[0] == next_parent and not trim_tags:
+                if commit.parents[0] == next_parent and trim_tags == TrimTags.NONE:
                     # If the intended parent is the same as the actual parent, skip the
                     # cherry-pick process (unless the commit msg needs to change).
                     review.new_commits.append(commit.commit_id)
