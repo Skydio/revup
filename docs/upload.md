@@ -8,7 +8,7 @@ revup upload - Modify or create code reviews.
 : `upload [--help] [--base-branch=<br>] [--relative-branch=<br>]`
 `[--rebase] [--relative-chain] [--skip-confirm] [--dry-run] [--push-only]`
 `[--status] [--no-update-pr-body] [--review-graph]`
-`[--trim-tags] [--create-local-branches] [--patchsets] [--auto-add-users=<o>]`
+`[--trim-tags=<mode>] [--create-local-branches] [--patchsets] [--auto-add-users=<o>]`
 `[--force-reviewers] [--pr-body-source=<src>] [--skip-empty-first-commit]`
 `[--draft-on-create-only]`
 `[--labels=<labels>] [<topics>]`
@@ -189,9 +189,11 @@ Update-Pr-Body: tag section for details.
 titles of all PRs in the relative chain. This comment is updated if the graph
 ever changes.
 
-**--trim-tags**
-: Trim all lines containing revup related tags from all commit messages before
-pushing the branch. This also affects the default PR body text.
+**--trim-tags=<mode>**
+: Trim lines containing revup related tags from all commit messages before
+pushing the branch. This also affects the default PR body text. "true" trims
+every tag, while "nonidentifying" only trims empty tags along with
+labels, reviewers, assignees, draft and update-pr-body. Defaults to "false".
 
 **--create-local-branches**
 : Also create local branches for each review with the same name as the

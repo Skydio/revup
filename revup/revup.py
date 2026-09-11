@@ -20,7 +20,7 @@ from revup.completion import (
 from revup.config import RevupArgParser
 from revup.core_types import RevupUsageException
 from revup.forge_utils import parse_forge_info
-from revup.topic_stack import PrBodySource
+from revup.topic_stack import PrBodySource, TrimTags
 from revup.version import REVUP_VERSION
 
 REVUP_CONFIG_ENV_VAR = "REVUP_CONFIG_PATH"
@@ -170,7 +170,11 @@ def build_parser() -> Tuple[RevupArgParser, List[RevupArgParser]]:
     upload_parser.add_argument("--update-pr-body", action="store_true", default=True)
     upload_parser.add_argument("--create-local-branches", action="store_true")
     upload_parser.add_argument("--review-graph", action="store_true", default=True)
-    upload_parser.add_argument("--trim-tags", action="store_true")
+    upload_parser.add_argument(
+        "--trim-tags",
+        default=TrimTags.NONE.value,
+        choices=[t.value for t in TrimTags],
+    )
     upload_parser.add_argument("--patchsets", action="store_true", default=True)
     upload_parser.add_argument("--self-authored-only", action="store_true", default=True)
     upload_parser.add_argument("--labels")
