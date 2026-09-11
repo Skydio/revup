@@ -62,6 +62,7 @@ async def run(
         await topics.populate_relative_reviews(
             args.uploader if args.uploader else git_ctx.author,
             branch_format=args.branch_format,
+            deep_stack_draft=args.deep_stack_draft,
         )
 
     yield UploadPhase.POPULATED, topics

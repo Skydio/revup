@@ -44,6 +44,7 @@ def make_upload_args(**kwargs):
         "head": "HEAD",
         "skip_empty_first_commit": False,
         "verbose": False,
+        "deep_stack_draft": 0,
     }
     defaults.update(kwargs)
     return argparse.Namespace(**defaults)
@@ -81,6 +82,7 @@ async def run_upload_pipeline(env, **kwargs):
     await topics.populate_relative_reviews(
         args.uploader if args.uploader else env.git_ctx.author,
         branch_format=args.branch_format,
+        deep_stack_draft=args.deep_stack_draft,
     )
     await topics.create_commits(args.trim_tags, args.skip_empty_first_commit)
     return topics
@@ -494,6 +496,56 @@ class TestUploadDraftTag:
 
             with pytest.raises(RevupUsageException):
                 await run_upload_pipeline(env)
+
+
+class TestUploadDeepStackDraft:
+    async def make_chain(self, env):
+        await setup_repo(env)
+        await env.commit("first\n\nTopic: first", {"a.txt": "a"})
+        await env.commit("second\n\nTopic: second\nRelative: first", {"b.txt": "b"})
+        await env.commit("third\n\nTopic: third\nRelative: second", {"c.txt": "c"})
+
+    def drafts(self, topics):
+        return [
+            topics.topics[name].reviews["origin/main"].is_draft
+            for name in ("first", "second", "third")
+        ]
+
+    @async_test
+    async def test_zero_disables_auto_draft(self):
+        async with GitTestEnvironment() as env:
+            await self.make_chain(env)
+
+            topics = await run_upload_pipeline(env, deep_stack_draft=0)
+            assert self.drafts(topics) == [False, False, False]
+
+    @async_test
+    async def test_one_drafts_whole_chain(self):
+        async with GitTestEnvironment() as env:
+            await self.make_chain(env)
+
+            topics = await run_upload_pipeline(env, deep_stack_draft=1)
+            assert self.drafts(topics) == [True, True, True]
+
+    @async_test
+    async def test_depth_drafts_reviews_at_or_past_it(self):
+        async with GitTestEnvironment() as env:
+            await self.make_chain(env)
+
+            topics = await run_upload_pipeline(env, deep_stack_draft=3)
+            assert self.drafts(topics) == [False, False, True]
+
+    @async_test
+    async def test_draft_tag_overrides_auto_draft(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            await env.commit("first\n\nTopic: first", {"a.txt": "a"})
+            await env.commit(
+                "second\n\nTopic: second\nRelative: first\nDraft: false", {"b.txt": "b"}
+            )
+
+            topics = await run_upload_pipeline(env, deep_stack_draft=2)
+            assert topics.topics["second"].reviews["origin/main"].is_draft is False
 
 
 class TestUploadAutoAddUsers:
@@ -1430,6 +1482,7 @@ def make_forge_upload_args(**kwargs):
         "force_reviewers": False,
         "pr_body_source": PrBodySource.FIRST_COMMIT,
         "draft_on_create_only": False,
+        "deep_stack_draft": 0,
     }
     defaults.update(kwargs)
     return argparse.Namespace(**defaults)

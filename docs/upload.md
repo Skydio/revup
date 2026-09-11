@@ -10,7 +10,7 @@ revup upload - Modify or create code reviews.
 `[--status] [--no-update-pr-body] [--review-graph]`
 `[--trim-tags] [--create-local-branches] [--patchsets] [--auto-add-users=<o>]`
 `[--force-reviewers] [--pr-body-source=<src>] [--skip-empty-first-commit]`
-`[--draft-on-create-only]`
+`[--draft-on-create-only] [--deep-stack-draft=<depth>]`
 `[--labels=<labels>] [<topics>]`
 
 # DESCRIPTION
@@ -73,8 +73,8 @@ name in github exactly. If a label cannot be found a warning is printed.
 
 **Draft:**
 : Accepts "true" or "false" and marks or unmarks the PR as a draft. PRs are
-not drafts if this tag is omitted. See --draft-on-create-only to only apply
-this tag when the PR is created.
+not drafts if this tag is omitted, unless --deep-stack-draft applies. See
+--draft-on-create-only to only apply this tag when the PR is created.
 
 **Uploader:**
 : Optionally specifies a custom uploader name that will be used instead of the
@@ -242,6 +242,11 @@ the merged history.
 : Only use the "Draft:" tag to decide draft status when creating a PR, and never
 change it afterwards. This allows marking a PR ready for review in github without
 revup turning it back into a draft.
+
+**--deep-stack-draft=<depth>**
+: Automatically mark PRs as drafts once they are this deep in a relative chain,
+where the first PR of a chain has depth 1. A value of 0 (the default) disables the
+feature. The "Draft:" tag overrides this for a topic.
 
 **--head**
 : The name or commit of the branch to be uploaded. If not specified, defaults to HEAD.
