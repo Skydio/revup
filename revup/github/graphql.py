@@ -105,6 +105,8 @@ class SingleQuery:
     values: List[Any]
     fragment: str
     index: int
+    # False if re-sending this field would duplicate an effect it already applied.
+    replay_safe: bool = True
 
     @property
     def alias(self) -> str:
@@ -161,6 +163,7 @@ class GraphqlQuery:
         var_types: List[str],
         values: List[Any],
         fragment: str = "",
+        replay_safe: bool = True,
     ) -> None:
         """Add a field. Its alias index is fixed here so results stay addressable
         by prefix even after the query is split and its results merged."""
@@ -176,8 +179,18 @@ class GraphqlQuery:
                 values=list(values),
                 fragment=fragment,
                 index=idx,
+                replay_safe=replay_safe,
             )
         )
+
+    @property
+    def replay_safe(self) -> bool:
+        """Whether the whole request can be re-sent when its response never arrived."""
+        return all(q.replay_safe for q in self.queries)
+
+    def replay_unsafe_fields(self) -> List[Tuple[str, List[Any]]]:
+        """The alias and variable values of every field that can't be re-sent."""
+        return [(q.alias, list(q.values)) for q in self.queries if not q.replay_safe]
 
     def extract(self, result: Any, prefix: str) -> List[Any]:
         """Return the result node for every field with the given prefix, in add order."""
@@ -286,3 +299,7 @@ class GraphqlQuery:
         collision. Used to re-transact only the fields that failed retryably.
         """
         return self._with_fields([q for q in self.queries if q.alias in aliases])
+
+    def without(self, aliases: Set[str]) -> GraphqlQuery:
+        """A query containing every field whose alias is not in `aliases`."""
+        return self._with_fields([q for q in self.queries if q.alias not in aliases])
