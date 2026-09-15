@@ -27,6 +27,14 @@ full command-line of any subprocesses that are run along with
 their full output, as well as the full input and output of any
 graphql requests to the forge.
 
+**--log-to-file**
+: Writes debug details to a log file. Logs are written to
+`$XDG_STATE_HOME/revup/logs` (or `~/.local/state/revup/logs` if that
+isn't set) and named after the start time and process id. The 20 newest
+logs are kept and older ones are deleted.
+
+Can be combined with --verbose to print debug info to both terminal and file.
+
 **--help, -h**
 : Show this help page.
 
