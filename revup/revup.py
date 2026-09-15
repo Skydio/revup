@@ -56,6 +56,7 @@ def make_toplevel_parser() -> RevupArgParser:
     revup_parser.add_argument("--fork-name", default="")
     revup_parser.add_argument("--editor")
     revup_parser.add_argument("--verbose", "-v", action="store_true")
+    revup_parser.add_argument("--log-to-file", action="store_true")
     revup_parser.add_argument("--keep-temp", "-k", action="store_true")
     revup_parser.add_argument("--git-path", default="")
     revup_parser.add_argument("--main-branch", default="main")
@@ -110,7 +111,7 @@ async def get_config() -> config.Config:
 
 
 def dump_args(args: argparse.Namespace) -> None:
-    if args.verbose:
+    if logging.getLogger().isEnabledFor(logging.DEBUG):
         import json
 
         logging.debug(json.dumps(vars(args), default=str, indent=2))
@@ -338,6 +339,7 @@ async def main(revup_parser: RevupArgParser, all_parsers: List[RevupArgParser]) 
     logs.configure_logger(
         debug=args.verbose,
         redactions={args.forge_oauth: "<GITHUB_OAUTH>"} if args.forge_oauth else {},
+        log_to_file=args.log_to_file,
     )
 
     if args.cmd != "toolkit":

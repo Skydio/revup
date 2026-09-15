@@ -22,6 +22,14 @@ from typing import (
 _HANDLE = Union[None, int, IO[Any]]
 
 
+def debug_enabled() -> bool:
+    """
+    Whether any logging backend consumes debug logs. Verbose messages can be expensive
+    to format (decoding entire command outputs), so skip them if nobody will see them.
+    """
+    return logging.getLogger().isEnabledFor(logging.DEBUG)
+
+
 def log_command(args: Sequence[str]) -> None:
     """
     Given a command, print it in a both machine and human readable way.
@@ -126,10 +134,10 @@ class Shell:
         Args:
             cwd: Current working directory of the shell.  Pass None to
                 initialize to the current cwd of the current process.
-            quiet: If True, suppress printing out the command executed
-                by the shell.  By default, we print out commands for ease
-                of debugging.  Quiet is most useful for non-mutating
-                shell commands.
+            quiet: If True, don't ask subprocesses to be verbose about what
+                they're doing, since that output goes straight to the user's
+                terminal. Note this doesn't affect debug logging of commands
+                and their output, which is governed by the log level.
         """
         self.quiet = quiet
         self.cwd = cwd if cwd else os.getcwd()
@@ -208,7 +216,7 @@ class Shell:
                 and return it
             raiseonerror: whether to raise an error if return value is not 0
         """
-        if not self.quiet:
+        if debug_enabled():
             log_command(args)
         start_time = time.time()
         tasks = await self.create_sh_task(
@@ -224,7 +232,7 @@ class Shell:
         _, out, err, ret = await asyncio.gather(*tasks)
 
         ret = self.handle_sh_results(ret, out, err, stdout, raiseonerror, quiet, *args)
-        if not self.quiet:
+        if debug_enabled():
             logging.debug("Took {}s".format(time.time() - start_time))
         return ret
 
@@ -245,7 +253,7 @@ class Shell:
         start_time = time.time()
         read, write = os.pipe()
         log_args = args1 + ["|"] + args2
-        if not self.quiet:
+        if debug_enabled():
             log_command(log_args)
 
         tasks = await asyncio.gather(
@@ -268,7 +276,7 @@ class Shell:
             ret2 if ret1 == 0 else ret1, out2, err1 + err2, stdout, raiseonerror, quiet, *log_args
         )
         os.close(read)
-        if not self.quiet:
+        if debug_enabled():
             logging.debug("Took {}s".format(time.time() - start_time))
         return ret
 
@@ -284,9 +292,9 @@ class Shell:
     ) -> Tuple[int, str]:
         if returncode and err:
             logging.warning(err.decode(errors="backslashreplace"))
-        elif not (quiet or self.quiet) and err:
+        elif not quiet and debug_enabled() and err:
             logging.debug("# stderr:\n{}".format(err.decode(errors="backslashreplace")))
-        if not (quiet or self.quiet) and out:
+        if not quiet and debug_enabled() and out:
             logging.debug(
                 "{}{}".format(
                     ("# stdout:\n" if err else ""),
