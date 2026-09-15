@@ -13,9 +13,15 @@ from revup.github.graphql import GraphqlResponse
 # HTTP statuses worth retrying: gateway/timeout (5xx) and secondary-rate-limit (403).
 TRANSIENT_STATUSES = frozenset({500, 502, 503, 504})
 SECONDARY_LIMIT_STATUS = 403
+MAX_RETRIES = 3
 # Cap how long we'll auto-sleep waiting for a rate limit to reset. A longer wait
 # (primary budget exhausted) is surfaced to the user instead of hanging silently.
 MAX_BACKOFF_SECONDS = 60.0
+
+
+def is_transient_status(status: int) -> bool:
+    """Whether an http status means the request is worth sending again."""
+    return status in TRANSIENT_STATUSES or status == SECONDARY_LIMIT_STATUS
 
 
 def _backoff_delay(headers: Any, attempt: int, base_delay: float) -> float:
@@ -138,7 +144,7 @@ class GitHubEndpoint:
         self,
         query: str,
         *,
-        max_retries: int = 3,
+        max_retries: int = MAX_RETRIES,
         base_delay: float = 1.0,
         **kwargs: Any,
     ) -> GraphqlResponse:
@@ -161,8 +167,7 @@ class GitHubEndpoint:
                     raise RevupForgeException(body["errors"])
                 return GraphqlResponse.parse(body)
 
-            retryable = status in TRANSIENT_STATUSES or status == SECONDARY_LIMIT_STATUS
-            if not retryable or attempt >= max_retries - 1:
+            if not is_transient_status(status) or attempt >= max_retries - 1:
                 raise RevupRequestException(status, body if body is not None else {})
 
             delay = min(_backoff_delay(headers, attempt, base_delay), MAX_BACKOFF_SECONDS)
