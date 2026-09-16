@@ -27,6 +27,33 @@ full command-line of any subprocesses that are run along with
 their full output, as well as the full input and output of any
 graphql requests to the forge.
 
+**--log-to-file**
+: Writes debug details to a log file instead of the terminal, leaving
+normal output unchanged. Off by default. Useful for inspecting a run
+that has already finished, since it doesn't require knowing ahead of
+time that you'd want verbose output.
+
+This flag and --verbose are independent, since they control different
+destinations:
+
+- With this option enabled and --verbose disabled: the terminal shows
+exactly what it normally would, while the log file receives all the
+debug details listed under --verbose. Subprocesses are still asked to
+be quiet, so no extra output is printed anywhere.
+- With this option enabled and --verbose enabled: the log file
+receives those same details and the terminal shows them
+too. Subprocesses are also asked to be verbose, and their extra output
+goes to the terminal as well as to the log (wherever revup reads it)
+instead of passing it straight through.
+- With this option disabled: no log file is written. If --verbose is
+disabled as well, debug details are discarded rather than formatted at
+all, so nothing pays the cost of producing them.
+
+Logs are written to `$XDG_STATE_HOME/revup/logs` (or
+`~/.local/state/revup/logs` if that isn't set), one file per
+invocation named after the start time and process id. The 20 newest
+files are kept and older ones are deleted.
+
 **--help, -h**
 : Show this help page.
 
