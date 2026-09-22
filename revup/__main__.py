@@ -1,6 +1,7 @@
 # PYTHON_ARGCOMPLETE_OK
 import asyncio
 import logging
+import signal
 import sys
 
 from revup.core_types import (
@@ -22,8 +23,17 @@ def _main() -> None:
         # Instead, we can manually create the event loop and prevent the RuntimeError on shutdown.
         revup_parser, all_parsers = build_parser()
         loop = asyncio.new_event_loop()
+        task = loop.create_task(main(revup_parser, all_parsers))
+        # Let the loop cancel main on sigint, so it unwinds and cleans up instead of being
+        # abandoned suspended. Windows has no signal handling for loops.
+        if sys.platform != "win32":
+            loop.add_signal_handler(signal.SIGINT, task.cancel)
         try:
-            sys.exit(loop.run_until_complete(main(revup_parser, all_parsers)))
+            sys.exit(loop.run_until_complete(task))
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            # Exit code of 130 is the shell convention for death by sigint.
+            logging.error("Interrupted")
+            sys.exit(130)
         finally:
             loop.close()
     except RevupUsageException as e:
