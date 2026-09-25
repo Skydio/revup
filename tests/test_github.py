@@ -9,7 +9,7 @@ import pytest
 
 from revup.core_types import RevupForgeException, RevupRequestException
 from revup.forge import ForgeRepoInfo, PrComment, PrInfo, PrUpdate
-from revup.github.endpoint import GitHubEndpoint, _backoff_delay
+from revup.github.endpoint import MAX_RETRIES, GitHubEndpoint, _backoff_delay
 from revup.github.github import _MAX_STALLED_RETRIES, Github, _merge_data
 from revup.github.graphql import GraphqlResponse
 
@@ -620,6 +620,91 @@ class TestUpdatePullRequests:
         assert kwargs["from_d0"]["pullRequestId"] == "PR_1"
         assert "to_d0" not in kwargs
 
+    def test_transient_status_drops_a_comment_github_already_added(self):
+        """Github applies mutation fields before its gateway gives up, and a 502 carries no
+        field results, so the comments on the pr decide what to resend: this one is there."""
+        ep = make_endpoint()
+        ep._post = commenting_post({"PR_1": ["hi"]})
+        gh = make_github(ep)
+
+        asyncio.run(gh.update_pull_requests([PrUpdate(id="PR_1", comments=[PrComment("hi")])]))
+
+        sent = ep._post.sent
+        assert sum("addComment" in q for q, _ in sent) == 1
+        # The rest of the mutation is idempotent, so it still gets resent.
+        assert sum("updatePullRequest" in q for q, _ in sent) == 2
+
+    def test_transient_status_resends_a_comment_github_never_added(self):
+        """A comment that isn't on the pr never landed, so the mutation is resent."""
+        ep = make_endpoint()
+        ep._post = commenting_post({"PR_1": []})
+        gh = make_github(ep)
+
+        asyncio.run(gh.update_pull_requests([PrUpdate(id="PR_1", comments=[PrComment("hi")])]))
+
+        resent = [kwargs for q, kwargs in ep._post.sent if "addComment" in q]
+        assert len(resent) == 2
+        assert resent[1]["com0"]["body"] == "hi"
+
+    def test_transient_status_resends_only_the_missing_comment(self):
+        """Fields are resolved one by one, so a lost comment is resent while one that
+        landed in the same request is dropped."""
+        ep = make_endpoint()
+        ep._post = commenting_post({"PR_1": ["landed"]})
+        gh = make_github(ep)
+
+        asyncio.run(
+            gh.update_pull_requests(
+                [PrUpdate(id="PR_1", comments=[PrComment("landed"), PrComment("lost")])]
+            )
+        )
+
+        resent = [kwargs for q, kwargs in ep._post.sent if "addComment" in q][1]
+        assert resent["com1"]["body"] == "lost"
+        assert "com0" not in resent
+
+    def test_repeated_transient_status_stops_resending(self):
+        """A mutation that keeps failing gives up instead of checking and resending
+        forever."""
+        ep = make_endpoint()
+        ep._post = commenting_post({"PR_1": []}, fail_forever=True)
+        gh = make_github(ep)
+
+        with pytest.raises(RevupRequestException):
+            asyncio.run(gh.update_pull_requests([PrUpdate(id="PR_1", comments=[PrComment("hi")])]))
+
+        assert sum("addComment" in q for q, _ in ep._post.sent) == MAX_RETRIES
+
+    def test_transient_status_retries_mutation_without_added_comments(self):
+        """Every mutation field other than addComment is idempotent, so it still retries."""
+        ep = make_endpoint()
+        ep._post = scripted_post(
+            (502, {}, None),
+            (200, {}, {"data": {"pr_out0": {"clientMutationId": "revup"}}}),
+        )
+        gh = make_github(ep)
+
+        with patch("asyncio.sleep", new=AsyncMock()) as sleep:
+            asyncio.run(
+                gh.update_pull_requests(
+                    [PrUpdate(id="PR_1", title="t", comments=[PrComment("edit me", "C_1")])]
+                )
+            )
+        sleep.assert_awaited_once()
+
+    def test_transient_status_with_only_added_comments_sends_nothing_more(self):
+        """A split can leave a subquery holding only comments; when they all landed there
+        is nothing left to send."""
+        ep = make_endpoint()
+        ep._post = commenting_post({"PR_1": ["hi"]})
+        gh = make_github(ep)
+
+        q = gh._build_update_mutation([PrUpdate(id="PR_1", comments=[PrComment("hi")])])
+        resp = asyncio.run(gh._run_once(q.subset({"com_out0"})))
+
+        assert resp.data == {}
+        assert sum("addComment" in query for query, _ in ep._post.sent) == 1
+
     def test_mutation_timeout_resubmits_only_unapplied(self):
         """On a whole-request timeout, fields that applied (non-null data) are kept and
         only the unapplied (null) fields are resubmitted — no duplicate side effects."""
@@ -938,6 +1023,48 @@ def scripted_post(*responses):
     async def _post(query, kwargs):
         return next(it)
 
+    return _post
+
+
+def _alias_of(var_name):
+    """The field alias that goes with a rendered variable name."""
+    prefix = var_name.rstrip("0123456789")
+    return f"{prefix}_out{var_name[len(prefix) :]}"
+
+
+def commenting_post(comments_by_pr, fail_forever=False):
+    """An async _post replacement that fails a mutation adding comments with a 502, answers
+    the resulting comment lookup from `comments_by_pr`, and succeeds on anything else.
+
+    Records every (query, variables) it was sent as `.sent`.
+    """
+    sent = []
+
+    async def _post(query, kwargs):
+        sent.append((query, kwargs))
+        if "node(" in query:
+            return (
+                200,
+                {},
+                {
+                    "data": {
+                        _alias_of(name): {
+                            "comments": {"nodes": [{"body": b} for b in comments_by_pr[pr_id]]}
+                        }
+                        for name, pr_id in kwargs.items()
+                    }
+                },
+            )
+        first_add = not any("addComment" in q for q, _ in sent[:-1])
+        if "addComment" in query and (fail_forever or first_add):
+            return 502, {}, None
+        return (
+            200,
+            {},
+            {"data": {_alias_of(name): {"clientMutationId": "revup"} for name in kwargs}},
+        )
+
+    _post.sent = sent
     return _post
 
 

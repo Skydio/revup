@@ -1,7 +1,7 @@
 import logging
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from revup.core_types import RevupForgeException
+from revup.core_types import RevupForgeException, RevupRequestException
 from revup.forge import (
     MAX_COMMENTS_TO_QUERY,
     Forge,
@@ -10,7 +10,7 @@ from revup.forge import (
     PrInfo,
     PrUpdate,
 )
-from revup.github.endpoint import GitHubEndpoint
+from revup.github.endpoint import MAX_RETRIES, GitHubEndpoint, is_transient_status
 from revup.github.graphql import (
     ErrorClass,
     GraphqlError,
@@ -128,6 +128,10 @@ LABEL_FRAGMENT = """
 # or a repeated timeout) before treating its errors as fatal.
 _MAX_STALLED_RETRIES = 2
 
+# How many of a pr's newest comments to read when checking whether an add landed. The
+# comment would be the newest, with headroom for others posted in the meantime.
+MAX_COMMENTS_TO_CHECK = 20
+
 
 def _merge_data(into: Dict[str, Any], src: Any) -> None:
     """Merge GraphQL `data` dict `src` into `into`, combining nested repository fields."""
@@ -191,6 +195,18 @@ class GithubQuery(GraphqlQuery):
                 ),
                 var_types=["String!", "String!"],
                 values=[org, slug],
+            )
+
+    def add_comment_queries(self, subject_ids: List[str]) -> None:
+        for subject_id in subject_ids:
+            self.add(
+                prefix="coms",
+                scope="top",
+                field_template="{}: node(id: {}) {{... on PullRequest {{comments (last: "
+                + str(MAX_COMMENTS_TO_CHECK)
+                + ") {{nodes {{body}}}}}}}},",
+                var_types=["ID!"],
+                values=[subject_id],
             )
 
     def parse_prs(self, result: Any, head_refs: List[str]) -> List[Optional[PrInfo]]:
@@ -327,6 +343,16 @@ class GithubQuery(GraphqlQuery):
                 logging.warning("Couldn't find an existing label named {}".format(label))
         return labels_to_ids
 
+    def parse_comment_bodies(
+        self, result: Any, subject_ids: List[str]
+    ) -> Dict[str, Optional[Set[str]]]:
+        """Map each subject id to the bodies of its newest comments, or None if github
+        didn't return them."""
+        bodies: Dict[str, Optional[Set[str]]] = {}
+        for subject_id, node in zip(subject_ids, self.extract(result, "coms")):
+            bodies[subject_id] = {c["body"] for c in node["comments"]["nodes"]} if node else None
+        return bodies
+
     def parse_teams(
         self, result: Any, teams: List[Tuple[str, str]]
     ) -> Tuple[Dict[str, str], Dict[str, Optional[Set[str]]]]:
@@ -394,9 +420,53 @@ class Github(Forge):
 
         return q
 
-    async def _run_once(self, q: GraphqlQuery) -> GraphqlResponse:
+    async def _run_once(self, q: GraphqlQuery, attempts: int = MAX_RETRIES) -> GraphqlResponse:
         query_str, variables = q.build()
-        return await self.endpoint.graphql(query_str, **variables)
+        if q.replay_safe:
+            return await self.endpoint.graphql(query_str, **variables)
+
+        # A transient http failure carries no field results, so a resend can't know what
+        # already applied. Github runs mutation fields in order and applies their effects
+        # before the gateway gives up, so send once, then look up which comments landed and
+        # resend only the fields that didn't.
+        try:
+            return await self.endpoint.graphql(query_str, max_retries=1, **variables)
+        except RevupRequestException as e:
+            if attempts <= 1 or not is_transient_status(e.status):
+                raise
+            logging.warning(
+                "GitHub returned {}, checking which comments it added before retrying".format(
+                    e.status
+                )
+            )
+
+        remaining = q.without(await self._comments_already_added(q))
+        if remaining.total_items() == 0:
+            # Every field landed before the failure, so there's nothing left to send.
+            return GraphqlResponse(data={})
+        return await self._run_once(remaining, attempts - 1)
+
+    async def _comments_already_added(self, q: GraphqlQuery) -> Set[str]:
+        """Aliases of the given mutation's comment fields that must not be sent again.
+
+        The failure said nothing about what applied, so ask github which comments are on
+        the prs now. A comment github doesn't positively show as missing counts as added,
+        since a duplicate is worse than one the next upload adds.
+        """
+        # addComment is the only field that isn't replay safe, and takes a single input.
+        inputs = {alias: values[0] for alias, values in q.replay_unsafe_fields()}
+        subject_ids = list(dict.fromkeys(inp["subjectId"] for inp in inputs.values()))
+
+        check = GithubQuery(name="FindComments")
+        check.add_comment_queries(subject_ids)
+        bodies = check.parse_comment_bodies(await self._execute(check), subject_ids)
+
+        added = set()
+        for alias, inp in inputs.items():
+            on_pr = bodies[inp["subjectId"]]
+            if on_pr is None or inp["body"] in on_pr:
+                added.add(alias)
+        return added
 
     async def _execute(self, q: GraphqlQuery) -> Dict[str, Any]:
         """Run a query/mutation, salvaging partial results and re-transacting the rest.
@@ -673,7 +743,13 @@ class Github(Forge):
 
         q = GraphqlQuery(operation=GraphqlOperation.MUTATION)
 
-        def add_all(prefix: str, mutation: str, var_type: str, items: List[Any]) -> None:
+        def add_all(
+            prefix: str,
+            mutation: str,
+            var_type: str,
+            items: List[Any],
+            replay_safe: bool = True,
+        ) -> None:
             for inp in items:
                 q.add(
                     prefix=prefix,
@@ -686,9 +762,12 @@ class Github(Forge):
             }},""",
                     var_types=[var_type],
                     values=[inp],
+                    replay_safe=replay_safe,
                 )
 
-        add_all("com", "addComment", "AddCommentInput!", comments)
+        # Github allows any number of identical comments, so a resent addComment always
+        # adds another one. Every other mutation here is idempotent.
+        add_all("com", "addComment", "AddCommentInput!", comments, replay_safe=False)
         add_all("pr", "updatePullRequest", "UpdatePullRequestInput!", inputs)
         add_all("rev", "requestReviews", "RequestReviewsInput!", reviewers)
         add_all("asn", "addAssigneesToAssignable", "AddAssigneesToAssignableInput!", assignees)
