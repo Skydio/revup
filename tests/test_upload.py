@@ -1439,6 +1439,59 @@ class TestRebaseDetection:
             assert g_review.is_pure_rebase
             assert g_review.remote_commits[0].parents[0] == b_review.remote_commits[-1].commit_id
 
+    @async_test
+    async def test_relative_branch_moving_forward_is_pushed(self):
+        """A review stacked on a relative branch follows that branch's tip."""
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            root = await env.get_commit_hash()
+            await env.git_ctx.git("branch", "origin/staging", root)
+            await env.commit("feat\n\nTopic: alpha\nRelative-Branch: staging", {"a.txt": "a"})
+
+            first = await run_upload_pipeline(env)
+            first_review = first.topics["alpha"].reviews["origin/main"]
+            remote_head = first_review.new_commits[-1]
+            remote_num_commits = len(first_review.new_commits)
+
+            await env.git_ctx.git("checkout", root)
+            await env.commit("staging moves on", {"s.txt": "s"})
+            await env.git_ctx.git("branch", "origin/staging", "HEAD", "-f")
+            await env.git_ctx.git("checkout", "main")
+
+            topics = await run_upload_pipeline(env)
+            review = topics.topics["alpha"].reviews["origin/main"]
+            review.pr_info = PrInfo(
+                baseRef="staging",
+                headRef=review.remote_head,
+                headRefOid=remote_head,
+                numCommits=remote_num_commits,
+                body="",
+                title="",
+                state="OPEN",
+            )
+
+            await topics.mark_rebases(skip_rebase=True)
+
+            assert review.is_pure_rebase
+            assert review.remote_commits[0].parents[0] == root
+            assert review.push_status == PushStatus.PUSHED
+
+    @async_test
+    async def test_relative_branch_staying_put_is_nochange(self):
+        """A review already on the relative branch's tip isn't pushed again."""
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            await env.git_ctx.git("branch", "origin/staging", "HEAD")
+            await env.commit("feat\n\nTopic: alpha\nRelative-Branch: staging", {"a.txt": "a"})
+
+            topics = await run_upload_pipeline(env)
+            review = topics.topics["alpha"].reviews["origin/main"]
+            review.pr_info = make_pr_info(review, base_branch="staging")
+
+            await topics.mark_rebases(skip_rebase=True)
+
+            assert review.push_status == PushStatus.NOCHANGE
+
 
 class TestSkipEmptyFirstCommit:
     @async_test
