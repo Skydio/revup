@@ -921,11 +921,18 @@ class TopicStack:
                 if topic.relative_topic is None:
                     if not review.base_ref:
                         raise RuntimeError("Review doesn't have a base ref!")
-                    # For non-relative reviews, the base is correct if the remote base commit is a
-                    # first-parent ancestor of the local remote base.
-                    is_on_correct_base = await self.git_ctx.is_ancestor(
-                        review.remote_commits[0].parents[0], review.base_ref
-                    )
+                    remote_parent = review.remote_commits[0].parents[0]
+                    if review.relative_branch:
+                        # A relative branch is someone else's work that this review is stacked
+                        # on, so the review has to sit exactly on it, same as a relative series.
+                        # Anything else makes the forge show their commits as part of this review.
+                        is_on_correct_base = remote_parent == review.base_ref
+                    else:
+                        # For non-relative reviews, the base is correct if the remote base commit
+                        # is a first-parent ancestor of the local remote base.
+                        is_on_correct_base = await self.git_ctx.is_ancestor(
+                            remote_parent, review.base_ref
+                        )
                 else:
                     # For a relative series of reviews, revup will only ever upload them directly
                     # on top of each other. If this relationship is ever broken, we always reupload
