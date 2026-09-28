@@ -100,7 +100,7 @@ async def run(
 
     if not args.dry_run and not args.push_only:
         with get_console().status(f"Querying {forge.name}…"):
-            await topics.query()
+            await topics.query(args.draft_on_create_only)
             await topics.fetch_git_refs()
             await topics.mark_rebases(not args.rebase)
 
@@ -126,7 +126,6 @@ async def run(
             args.update_pr_body,
             args.force_reviewers,
             args.pr_body_source,
-            args.draft_on_create_only,
         )
     if not args.skip_confirm and topics.num_reviews_changed() > 0:
         topics.print(not args.verbose)

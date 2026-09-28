@@ -1237,7 +1237,7 @@ class TopicStack:
                 ),
             )
 
-    async def query(self) -> None:
+    async def query(self, draft_on_create_only: bool = False) -> None:
         """
         Query pr and reviewer/label info from the forge
         """
@@ -1295,8 +1295,14 @@ class TopicStack:
             review.pr_info = prs[i]
             if review.pr_info is None:
                 review.status = PrStatus.NEW
-            elif review.pr_info.state == "MERGED":
-                review.status = PrStatus.MERGED
+            else:
+                if review.pr_info.state == "MERGED":
+                    review.status = PrStatus.MERGED
+                if draft_on_create_only and not review.pr_info.is_draft:
+                    # Draft status can only be cleared after creation, never reapplied, since
+                    # the user may have marked the pr ready in the forge. Resolve it here so
+                    # that status output shows the state the pr will actually be left in.
+                    review.is_draft = False
             i += 1
 
         while i < len(pr_targets):
@@ -1341,7 +1347,6 @@ class TopicStack:
         update_pr_body_arg: bool,
         force_reviewers: bool = False,
         pr_body_source: PrBodySource = PrBodySource.FIRST_COMMIT,
-        draft_on_create_only: bool = False,
     ) -> None:
         """
         Populate information necessary to do PR creation / update on the forge.
@@ -1466,10 +1471,7 @@ class TopicStack:
                     review.pr_update.body = body
                 if update_pr_body and review.pr_info.title != title:
                     review.pr_update.title = title
-                if draft_on_create_only:
-                    # The forge's draft status wins, since the user may have changed it there
-                    review.is_draft = review.pr_info.is_draft
-                elif review.pr_info.is_draft != review.is_draft:
+                if review.pr_info.is_draft != review.is_draft:
                     review.pr_update.is_draft = review.is_draft
                 review.pr_update.label_ids = label_ids
                 review.pr_update.reviewer_ids = reviewer_ids

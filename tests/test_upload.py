@@ -1860,6 +1860,44 @@ class TestForgeLabels:
             assert review.is_draft is False
             assert pr.is_draft is False
 
+    @async_test
+    async def test_draft_on_create_only_status_shows_forge_draft(self):
+        """Status shows the draft state the pr will be left in, not the one revup wanted."""
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.commit("feat\n\nTopic: alpha\nDraft: true", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge, draft_on_create_only=True)
+            pr = list(forge.prs.values())[0]
+            pr.is_draft = False
+
+            topics = await full_upload_pipeline(env, forge, draft_on_create_only=True, status=True)
+
+            assert topics.topics["alpha"].reviews["origin/main"].is_draft is False
+
+    @async_test
+    async def test_draft_on_create_only_clears_draft_when_no_longer_needed(self):
+        """A pr revup drafted for being deep is marked ready once it leaves that depth."""
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await env.commit("first\n\nTopic: first", {"a.txt": "a"})
+            await env.commit("second\n\nTopic: second\nRelative: first", {"b.txt": "b"})
+
+            await full_upload_pipeline(env, forge, deep_stack_draft=2, draft_on_create_only=True)
+            pr = [p for p in forge.created_prs if p.headRef.endswith("second")][0]
+            assert pr.is_draft is True
+
+            # Make second no longer relative, which drops it to depth 1
+            await env.git_ctx.git("commit", "--amend", "-m", "second\n\nTopic: second")
+            topics = await full_upload_pipeline(
+                env, forge, deep_stack_draft=2, draft_on_create_only=True
+            )
+
+            assert topics.topics["second"].reviews["origin/main"].pr_update.is_draft is False
+            assert pr.is_draft is False
+
 
 class TestForgeReviewGraph:
     @async_test
