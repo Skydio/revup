@@ -248,9 +248,8 @@ using an empty commit purely for PR title and body text without that commit appe
 the merged history.
 
 **--draft-on-create-only**
-: Only apply draft status when creating a PR, and never change it afterwards.
-This allows marking a PR ready for review in github without revup turning it
-back into a draft.
+: Only apply draft status when creating a PR, not afterwards. This allows marking a PR 
+ready for review in github without revup turning it back into a draft.
 
 **--deep-stack-draft=<depth>**
 : Automatically mark PRs as drafts once they are this deep in a relative chain,
