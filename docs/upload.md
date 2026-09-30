@@ -121,7 +121,8 @@ that conflicts will not happen.
 **`<topics>`**
 : Optionally specify any number of topic names to upload. If none are
 specified, all topics are uploaded. If topics are specified they will
-be uploaded regardless of author.
+be uploaded regardless of author, along with any topics they are
+relative to.
 
 **--help, -h**
 : Show this help page.
