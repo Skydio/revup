@@ -552,6 +552,22 @@ class TopicStack:
                 add_tags(self.topics[name].tags, parsed_tags)
         self.populated = True
 
+    def relative_ancestors(self, limit_topics: List[str]) -> Set[str]:
+        """
+        Return the given topics along with topics they are transitively relative to, which
+        must also be uploaded so that their branches exist and are up to date.
+        """
+        ret = set(limit_topics)
+        for name in limit_topics:
+            topic = self.topics.get(name)
+            while topic is not None and len(topic.tags[TAG_RELATIVE]) == 1:
+                relative_name = min(topic.tags[TAG_RELATIVE])
+                if relative_name in ret:
+                    break
+                ret.add(relative_name)
+                topic = self.topics.get(relative_name)
+        return ret
+
     async def populate_reviews(
         self,
         force_relative_chain: bool = False,
@@ -566,10 +582,11 @@ class TopicStack:
         ensure it is valid.
         """
         last_topic = None
+        upload_topics = self.relative_ancestors(limit_topics) if limit_topics else set()
         # Copy topics before iterating so it's safe to delete from the original dict
         for name, topic in list(self.topics.items()):
-            if limit_topics:
-                if name not in limit_topics:
+            if upload_topics:
+                if name not in upload_topics:
                     # If an explicit list was specified, don't upload other topics
                     del self.topics[name]
                     continue

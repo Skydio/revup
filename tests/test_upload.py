@@ -191,6 +191,22 @@ class TestUploadLimitTopics:
             review = topics.topics["alpha"].reviews["origin/main"]
             assert len(review.new_commits) == 1
 
+    @async_test
+    async def test_limit_includes_relative_ancestors(self):
+        """Naming a topic also uploads what it is relative to, so its base still exists."""
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            await env.commit("a\n\nTopic: alpha", {"a.txt": "a"})
+            await env.commit("b\n\nTopic: beta\nRelative: alpha", {"b.txt": "b"})
+            await env.commit("c\n\nTopic: gamma\nRelative: beta", {"c.txt": "c"})
+            await env.commit("d\n\nTopic: delta", {"d.txt": "d"})
+
+            topics = await run_upload_pipeline(env, topics=["gamma"])
+
+            assert set(topics.topics) == {"alpha", "beta", "gamma"}
+            review = topics.topics["gamma"].reviews["origin/main"]
+            assert review.remote_base == topics.topics["beta"].reviews["origin/main"].remote_head
+
 
 class TestUploadRelativeTopics:
     @async_test
