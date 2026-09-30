@@ -1,13 +1,20 @@
+from __future__ import annotations
+
 import logging
 import os
 import re
 import sys
 import time
-from typing import Dict, List, Optional, Type, TypeVar
+from typing import TYPE_CHECKING, Dict, List, Optional, Type, TypeVar
 
-from rich._log_render import LogRender
 from rich.logging import RichHandler
 from rich.text import Text
+
+if TYPE_CHECKING:
+    # Importing rich.traceback costs 100ms, and rich only needs it for tracebacks, which
+    # revup doesn't enable.
+    from rich.console import ConsoleRenderable
+    from rich.traceback import Traceback
 
 from revup.version import REVUP_VERSION
 
@@ -43,21 +50,29 @@ class RedactingFilter(logging.Filter):
         self.redactions[needle] = replace
 
 
+LEVEL_PREFIXES = {
+    "WARNING": Text.styled("W: ", style="bold yellow"),
+    "ERROR": Text.styled("E: ", style="bold red"),
+}
+
+
 class RevupRichHandler(RichHandler):
-    def get_level_text(self, record: logging.LogRecord) -> Text:
-        self._log_render.show_level = True
-
-        if record.levelname == "WARNING":
-            return Text.styled("W:", style="bold yellow")
-
-        if record.levelname == "ERROR":
-            return Text.styled("E:", style="bold red")
-
-        self._log_render.show_level = False
-        return Text()
-
-    def set_render(self, log_render: LogRender) -> None:
-        self._log_render = log_render
+    def render(
+        self,
+        *,
+        record: logging.LogRecord,
+        traceback: Optional[Traceback],
+        message_renderable: ConsoleRenderable,
+    ) -> ConsoleRenderable:
+        """
+        Render the message on its own instead of in a column layout, so that every line of a
+        multiline message starts at the left margin.
+        """
+        prefix = LEVEL_PREFIXES.get(record.levelname)
+        if prefix is None:
+            return message_renderable
+        assert isinstance(message_renderable, Text)
+        return prefix + message_renderable
 
 
 def find_handler(handler_type: Type[HandlerType]) -> Optional[HandlerType]:
@@ -103,14 +118,6 @@ def prune_old_logs(log_dir: str, keep: int) -> None:
 def make_console_handler(log_filter: logging.Filter) -> RichHandler:
     handler = RevupRichHandler(keywords=[])
     handler.addFilter(log_filter)
-    handler.set_render(
-        LogRender(
-            show_time=False,
-            show_level=True,
-            show_path=False,
-            level_width=1,
-        )
-    )
     handler.highlighter = None  # type: ignore
     return handler
 

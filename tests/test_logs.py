@@ -148,6 +148,23 @@ class TestFileLoggingEnabled:
         logging.info("still works")
 
 
+class TestConsoleFormat:
+    def test_lines_arent_indented_and_levels_are_prefixed(self, capsys):
+        logs.configure_logger(debug=False, redactions={})
+        logging.info("info one\ninfo two")
+        logging.warning("warn one\nwarn two")
+        logging.error("error one\nerror two")
+
+        assert capsys.readouterr().out.splitlines() == [
+            "info one",
+            "info two",
+            "W: warn one",
+            "warn two",
+            "E: error one",
+            "error two",
+        ]
+
+
 class TestPruning:
     def make_logs(self, log_dir, count):
         """Create `count` log files whose names sort oldest to newest."""
