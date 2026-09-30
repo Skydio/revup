@@ -2459,3 +2459,19 @@ class TestForgePreUpload:
 
             assert not (env.tmp_dir / "hook_ran.txt").exists()
             assert len(forge.created_prs) == 1
+
+    @async_test
+    async def test_nothing_to_push_skips_the_command(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FakeForge()
+            await self.write_hook(env, "touch hook_ran.txt")
+            await env.commit("feat\n\nTopic: alpha", {"a.txt": "a"})
+
+            await full_upload_pipeline(env, forge)
+
+            # Nothing changed since the last upload, so no branch gets pushed
+            topics = await full_upload_pipeline(env, forge, pre_upload="hook.sh")
+
+            assert topics.topics["alpha"].reviews["origin/main"].push_status == PushStatus.NOCHANGE
+            assert not (env.tmp_dir / "hook_ran.txt").exists()

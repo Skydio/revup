@@ -133,8 +133,10 @@ async def run(
             return
 
     if args.pre_upload and not args.no_verify:
-        with get_console().status("Running pre-upload command"):
-            run_pre_upload(args.pre_upload, topics.get_pushed_ref_args(), git_ctx.repo_root)
+        ref_args = topics.get_pushed_ref_args()
+        if ref_args:
+            with get_console().status("Running pre-upload command"):
+                run_pre_upload(args.pre_upload, ref_args, git_ctx.repo_root)
 
     yield UploadPhase.READY_TO_PUSH, topics
 
