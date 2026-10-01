@@ -1,6 +1,7 @@
+from __future__ import annotations
+
 from abc import ABCMeta, abstractmethod
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
 
 
 @dataclass
@@ -20,48 +21,48 @@ class PullRequestParams:
 @dataclass
 class PrComment:
     text: str = ""
-    id: Optional[str] = None
+    id: str | None = None
 
 
 @dataclass
 class PrInfo:
     baseRef: str
     headRef: str
-    headRefOid: Optional[str]
+    headRefOid: str | None
     body: str
     title: str
     numCommits: int = 0
     id: str = ""
     url: str = ""
     state: str = ""
-    reviewers: Set[str] = field(default_factory=set)
-    reviewer_ids: Set[str] = field(default_factory=set)
-    reviewer_teams: Set[str] = field(default_factory=set)
-    reviewer_team_ids: Set[str] = field(default_factory=set)
-    assignees: Set[str] = field(default_factory=set)
-    assignee_ids: Set[str] = field(default_factory=set)
-    labels: Set[str] = field(default_factory=set)
-    label_ids: Set[str] = field(default_factory=set)
-    removed_reviewers: Set[str] = field(default_factory=set)
-    removed_reviewer_ids: Set[str] = field(default_factory=set)
-    removed_assignees: Set[str] = field(default_factory=set)
-    removed_assignee_ids: Set[str] = field(default_factory=set)
+    reviewers: set[str] = field(default_factory=set)
+    reviewer_ids: set[str] = field(default_factory=set)
+    reviewer_teams: set[str] = field(default_factory=set)
+    reviewer_team_ids: set[str] = field(default_factory=set)
+    assignees: set[str] = field(default_factory=set)
+    assignee_ids: set[str] = field(default_factory=set)
+    labels: set[str] = field(default_factory=set)
+    label_ids: set[str] = field(default_factory=set)
+    removed_reviewers: set[str] = field(default_factory=set)
+    removed_reviewer_ids: set[str] = field(default_factory=set)
+    removed_assignees: set[str] = field(default_factory=set)
+    removed_assignee_ids: set[str] = field(default_factory=set)
     is_draft: bool = False
-    comments: List[PrComment] = field(default_factory=list)
+    comments: list[PrComment] = field(default_factory=list)
 
 
 @dataclass
 class PrUpdate:
-    baseRef: Optional[str] = None
-    body: Optional[str] = None
-    title: Optional[str] = None
+    baseRef: str | None = None
+    body: str | None = None
+    title: str | None = None
     id: str = ""
-    reviewer_ids: Set[str] = field(default_factory=set)
-    reviewer_team_ids: Set[str] = field(default_factory=set)
-    assignee_ids: Set[str] = field(default_factory=set)
-    label_ids: Set[str] = field(default_factory=set)
-    is_draft: Optional[bool] = None
-    comments: List[PrComment] = field(default_factory=list)
+    reviewer_ids: set[str] = field(default_factory=set)
+    reviewer_team_ids: set[str] = field(default_factory=set)
+    assignee_ids: set[str] = field(default_factory=set)
+    label_ids: set[str] = field(default_factory=set)
+    is_draft: bool | None = None
+    comments: list[PrComment] = field(default_factory=list)
 
 
 MAX_COMMENTS_TO_QUERY = 3
@@ -90,18 +91,18 @@ class Forge(metaclass=ABCMeta):
     @abstractmethod
     async def query_everything(
         self,
-        head_refs: List[str],
-        user_ids: List[str],
-        labels: List[str],
-        teams: List[Tuple[str, str]],
-    ) -> Tuple[
+        head_refs: list[str],
+        user_ids: list[str],
+        labels: list[str],
+        teams: list[tuple[str, str]],
+    ) -> tuple[
         str,
-        List[Optional[PrInfo]],
-        Dict[str, str],
-        Dict[str, str],
-        Dict[str, str],
-        Dict[str, str],
-        Dict[str, Optional[Set[str]]],
+        list[PrInfo | None],
+        dict[str, str],
+        dict[str, str],
+        dict[str, str],
+        dict[str, str],
+        dict[str, set[str] | None],
     ]:
         """
         Query all needed info in one request. Returns:
@@ -115,15 +116,15 @@ class Forge(metaclass=ABCMeta):
         """
 
     @abstractmethod
-    async def create_pull_requests(self, repo_id: str, prs: List[PrInfo]) -> None:
+    async def create_pull_requests(self, repo_id: str, prs: list[PrInfo]) -> None:
         """Create pull requests. Modifies prs in-place to set id and url."""
 
     @abstractmethod
-    async def update_pull_requests(self, prs: List[PrUpdate]) -> None:
+    async def update_pull_requests(self, prs: list[PrUpdate]) -> None:
         """Update existing pull requests."""
 
     @abstractmethod
-    async def query_pr_by_number(self, owner: str, name: str, number: int) -> Tuple[str, str]:
+    async def query_pr_by_number(self, owner: str, name: str, number: int) -> tuple[str, str]:
         """Query a pull request by number and return (headRefName, baseRefName)."""
 
     @abstractmethod

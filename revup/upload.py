@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import argparse
 import enum
 import os
 import shlex
 import subprocess
-from typing import AsyncGenerator, List, Tuple
+from typing import AsyncGenerator
 
 from rich import get_console
 
@@ -21,7 +23,7 @@ class UploadPhase(enum.Enum):
     PRS_UPDATED = "prs_updated"
 
 
-def run_pre_upload(pre_upload: str, ref_args: List[str], repo_root: str) -> None:
+def run_pre_upload(pre_upload: str, ref_args: list[str], repo_root: str) -> None:
     """
     Run the pre-upload command with an argument for each ref that will be pushed. The program is
     taken from the repo root if it exists there, otherwise from PATH.
@@ -64,7 +66,7 @@ async def run(
     git_ctx: git.Git,
     forge: Forge,
     skip_push: bool = False,
-) -> AsyncGenerator[Tuple[UploadPhase, topic_stack.TopicStack], None]:
+) -> AsyncGenerator[tuple[UploadPhase, topic_stack.TopicStack], None]:
     """
     Core upload logic as an async generator yielding (phase, topics) at each stage.
     """

@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Dict, List, NewType
+from typing import NewType
 
 # A bunch of commonly used type definitions.
 
@@ -17,7 +19,7 @@ class CommitHeader:
     """
 
     tree: GitTreeHash
-    parents: List[GitCommitHash]
+    parents: list[GitCommitHash]
     author_name: str = ""
     author_email: str = ""
     author_date: str = ""
@@ -33,7 +35,7 @@ class CommitHeader:
 class GitConflict:
     type: str
     message: str
-    paths: List[str]
+    paths: list[str]
 
 
 # A conflict has appeared while doing a git operation. The higher level command
@@ -41,7 +43,7 @@ class GitConflict:
 class GitConflictException(Exception):
     def __init__(self, tree: GitTreeHash):
         self.tree = tree
-        self.conflicts: List[GitConflict] = []
+        self.conflicts: list[GitConflict] = []
 
 
 # Incorrect arguments or other usage error.
@@ -70,7 +72,7 @@ class RevupShellException(Exception):
 
 
 class RevupForgeException(Exception):
-    def __init__(self, error_json: List[Dict]):
+    def __init__(self, error_json: list[dict]):
         super().__init__()
         self.error_json = error_json
         messages = []
@@ -84,7 +86,7 @@ class RevupForgeException(Exception):
 
 
 class RevupRequestException(Exception):
-    def __init__(self, status: int, response: Dict):
+    def __init__(self, status: int, response: dict):
         super().__init__()
         self.status = status
         self.response = response

@@ -1,10 +1,11 @@
+from __future__ import annotations
+
 import argparse
 import asyncio
 import enum
 import logging
 import os
 from pathlib import Path
-from typing import List, Optional
 
 from revup.config import Config, RevupArgParser
 
@@ -41,11 +42,11 @@ SOURCE_LINE_TEMPLATES = {
 }
 
 
-def topic_completer(prefix: str, parsed_args: argparse.Namespace, **_kwargs: object) -> List[str]:
+def topic_completer(prefix: str, parsed_args: argparse.Namespace, **_kwargs: object) -> list[str]:
     try:
         from revup import git, toolkit
 
-        async def _get_names() -> List[str]:
+        async def _get_names() -> list[str]:
             # Build git and topics exactly as `revup toolkit list-topics` does, so
             # completion resolves the same base branch and returns the same topics.
             git_ctx = await git.make_git(parsed_args)
@@ -68,9 +69,9 @@ def topic_completer(prefix: str, parsed_args: argparse.Namespace, **_kwargs: obj
 
 
 def make_config_flag_completer(
-    all_parsers: List[RevupArgParser],
+    all_parsers: list[RevupArgParser],
 ) -> object:
-    def _completer(prefix: str, **_kwargs: object) -> List[str]:
+    def _completer(prefix: str, **_kwargs: object) -> list[str]:
         from revup.config import collect_known_keys
 
         flags = []
@@ -90,7 +91,7 @@ def prompt_config_key(shell: ShellType) -> str:
 
 
 def install_completion(
-    shell: ShellType, rc_file: Optional[str] = None, conf: Optional[Config] = None
+    shell: ShellType, rc_file: str | None = None, conf: Config | None = None
 ) -> int:
     rc_path = Path(rc_file or shell.default_rc_file).expanduser()
     source_line = SOURCE_LINE_TEMPLATES[shell]
@@ -112,7 +113,7 @@ def install_completion(
     return 0
 
 
-def detect_default_shell() -> Optional[ShellType]:
+def detect_default_shell() -> ShellType | None:
     shell_env = os.environ.get("SHELL", "")
     basename = Path(shell_env).name
     for s in ShellType:

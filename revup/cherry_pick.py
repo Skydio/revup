@@ -1,6 +1,7 @@
+from __future__ import annotations
+
 import argparse
 import logging
-from typing import Tuple
 
 from revup import config, git
 from revup.core_types import GitCommitHash, GitTreeHash, RevupUsageException
@@ -9,7 +10,7 @@ from revup.forge_utils import RE_PR_URL, forge_connection, parse_pull_request_ur
 
 async def resolve_pr_url(
     args: argparse.Namespace, git_ctx: git.Git, conf: config.Config, pr_url: str
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     """
     Resolve a PR URL to (head_ref, base_ref) by querying the GitHub API.
     """

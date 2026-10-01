@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import configparser
 import getpass
@@ -5,7 +7,7 @@ import logging
 import os
 import re
 from argparse import _StoreAction, _StoreFalseAction, _StoreTrueAction
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from revup.core_types import RevupUsageException
 
@@ -46,7 +48,7 @@ class RevupArgParser(argparse.ArgumentParser):
 
         return action
 
-    def collect_excluded_completions(self) -> List[str]:
+    def collect_excluded_completions(self) -> list[str]:
         excluded = []
         for action in self._actions:
             completable = getattr(action, "completable", False)
@@ -68,8 +70,8 @@ class RevupArgParser(argparse.ArgumentParser):
     def get_command(self) -> str:
         return self.prog.split()[-1].replace("-", "_")
 
-    def get_actions(self) -> Dict[str, argparse.Action]:
-        ret: Dict[str, argparse.Action] = {}
+    def get_actions(self) -> dict[str, argparse.Action]:
+        ret: dict[str, argparse.Action] = {}
         for action in self._actions:
             if not isinstance(action, (_StoreTrueAction, _StoreAction)):
                 # Ignore nonconfigurable actions (help, auto-generated negation)
@@ -132,7 +134,7 @@ class Config:
         self.config_path = config_path
         self.repo_config_path = repo_config_path
         self.git_dir_config_path = git_dir_config_path
-        self.file_configs: List[Tuple[str, configparser.ConfigParser]] = []
+        self.file_configs: list[tuple[str, configparser.ConfigParser]] = []
 
     def read(self) -> None:
         # Read in increasing precedence: later reads overwrite earlier ones.
@@ -156,7 +158,7 @@ class Config:
             self.config.write(f)
         self.dirty = False
 
-    def set_value(self, section: str, key: str, value: Optional[str]) -> None:
+    def set_value(self, section: str, key: str, value: str | None) -> None:
         if value is None:
             if self.config.has_option(section, key):
                 self.config.remove_option(section, key)
@@ -174,7 +176,7 @@ class Config:
     def get_config(self) -> configparser.ConfigParser:
         return self.config
 
-    def apply_to_parsers(self, all_parsers: List[RevupArgParser]) -> None:
+    def apply_to_parsers(self, all_parsers: list[RevupArgParser]) -> None:
         for p in all_parsers:
             p.set_defaults_from_config(self.config)
         known = collect_known_keys(all_parsers)
@@ -189,11 +191,11 @@ class Config:
                         logging.warning(f"Unrecognized config key {section}.{key} in {path}")
 
 
-def collect_known_keys(all_parsers: List[RevupArgParser]) -> Dict[str, List[str]]:
+def collect_known_keys(all_parsers: list[RevupArgParser]) -> dict[str, list[str]]:
     return {p.get_command(): list(p.get_actions().keys()) for p in all_parsers}
 
 
-def config_main(conf: Config, args: argparse.Namespace, all_parsers: List[RevupArgParser]) -> int:
+def config_main(conf: Config, args: argparse.Namespace, all_parsers: list[RevupArgParser]) -> int:
     split_key = args.flag[0].replace("-", "_").split(".")
     if len(split_key) == 1:
         command = "revup"

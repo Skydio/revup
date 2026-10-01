@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import asyncio
 import datetime
 import json
 import logging
 import time
-from typing import Any, Optional, Tuple, Union
+from typing import Any
 
 from aiohttp import ClientSession, ContentTypeError
 
@@ -62,37 +64,37 @@ class GitHubEndpoint:
     oauth_token: str
 
     # The URL of a proxy to use for these connections
-    proxy: Optional[str]
+    proxy: str | None
 
     # The certificate bundle to be used to verify the connection.
     # Passed to http as 'verify'.
-    verify: Optional[str]
+    verify: str | None
 
     # Client side certificate to use when connecitng.
     # Passed to http as 'cert'.
-    cert: Optional[Union[str, Tuple[str, str]]]
+    cert: str | tuple[str, str] | None
 
-    session: Optional[ClientSession] = None
+    session: ClientSession | None = None
 
     def __init__(
         self,
         oauth_token: str,
         github_url: str,
-        proxy: Optional[str] = None,
+        proxy: str | None = None,
     ):
         self.github_url = github_url
         self.oauth_token = oauth_token
         self.proxy = proxy
         self.graphql_endpoint = f"https://api.{github_url}/graphql"
         # Rate-limit budget from the most recent response, for end-of-run reporting.
-        self.last_ratelimit_remaining: Optional[str] = None
-        self.last_ratelimit_reset: Optional[str] = None
+        self.last_ratelimit_remaining: str | None = None
+        self.last_ratelimit_reset: str | None = None
 
     async def close(self) -> None:
         if self.session:
             await self.session.close()
 
-    async def _post(self, query: str, kwargs: Any) -> Tuple[int, Any, Any]:
+    async def _post(self, query: str, kwargs: Any) -> tuple[int, Any, Any]:
         """POST a GraphQL request. Returns (status, headers, body).
 
         No policy: never raises for HTTP status or GraphQL errors. body is the

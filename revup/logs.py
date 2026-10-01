@@ -5,7 +5,7 @@ import os
 import re
 import sys
 import time
-from typing import TYPE_CHECKING, Dict, List, Optional, Type, TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
 from rich.logging import RichHandler
 from rich.text import Text
@@ -22,7 +22,7 @@ HandlerType = TypeVar("HandlerType", bound=logging.Handler)
 
 
 class RedactingFilter(logging.Filter):
-    redactions: Dict[str, str]
+    redactions: dict[str, str]
 
     def __init__(self) -> None:
         super().__init__()
@@ -61,7 +61,7 @@ class RevupRichHandler(RichHandler):
         self,
         *,
         record: logging.LogRecord,
-        traceback: Optional[Traceback],
+        traceback: Traceback | None,
         message_renderable: ConsoleRenderable,
     ) -> ConsoleRenderable:
         """
@@ -75,7 +75,7 @@ class RevupRichHandler(RichHandler):
         return prefix + message_renderable
 
 
-def find_handler(handler_type: Type[HandlerType]) -> Optional[HandlerType]:
+def find_handler(handler_type: type[HandlerType]) -> HandlerType | None:
     """
     Find an already installed handler of the given type.
     """
@@ -103,7 +103,7 @@ def prune_old_logs(log_dir: str, keep: int) -> None:
     prune without stat-ing every file.
     """
     try:
-        names: List[str] = sorted(n for n in os.listdir(log_dir) if n.endswith(".log"))
+        names: list[str] = sorted(n for n in os.listdir(log_dir) if n.endswith(".log"))
     except OSError:
         return
 
@@ -122,7 +122,7 @@ def make_console_handler(log_filter: logging.Filter) -> RichHandler:
     return handler
 
 
-def make_file_handler(log_filter: logging.Filter) -> Optional[logging.FileHandler]:
+def make_file_handler(log_filter: logging.Filter) -> logging.FileHandler | None:
     """
     Create a handler that writes debug logs for this invocation to a new file. Returns
     None if the file couldn't be created, since logging is never worth failing over.
@@ -152,7 +152,7 @@ def make_file_handler(log_filter: logging.Filter) -> Optional[logging.FileHandle
     return handler
 
 
-def configure_logger(debug: bool, redactions: Dict[str, str], log_to_file: bool = False) -> None:
+def configure_logger(debug: bool, redactions: dict[str, str], log_to_file: bool = False) -> None:
     """
     Set up logging backends. Can be called more than once to update options, which is
     needed since some logging happens before config and args are fully parsed.
@@ -186,7 +186,7 @@ def configure_logger(debug: bool, redactions: Dict[str, str], log_to_file: bool 
             logging.debug("revup {} : {}".format(REVUP_VERSION, " ".join(sys.argv[1:])))
 
 
-def redact(redactions: Dict[str, str]) -> None:
+def redact(redactions: dict[str, str]) -> None:
     log_filter = get_log_filter()
     for k, v in redactions.items():
         log_filter.redact(k, v)
