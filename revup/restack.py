@@ -1,7 +1,8 @@
+from __future__ import annotations
+
 import argparse
 import copy
 from collections import defaultdict
-from typing import Dict, List, Optional, Set, Tuple
 
 from revup import git, topic_stack
 from revup.core_types import (
@@ -41,9 +42,9 @@ TAG_ORDER = [
 ]
 
 
-def merge_commit_messages(topics: TopicStack, commits: List[git.CommitHeader]) -> str:
-    all_tags: Dict[str, Set[str]] = defaultdict(set)
-    bodies: List[str] = []
+def merge_commit_messages(topics: TopicStack, commits: list[git.CommitHeader]) -> str:
+    all_tags: dict[str, set[str]] = defaultdict(set)
+    bodies: list[str] = []
 
     for commit in commits:
         tags, trimmed = topics.parse_commit_tags(commit.commit_msg)
@@ -66,11 +67,11 @@ def merge_commit_messages(topics: TopicStack, commits: List[git.CommitHeader]) -
 async def squash_topics(
     topics: TopicStack,
     head: GitCommitHash,
-    to_restack: List[git.CommitHeader],
+    to_restack: list[git.CommitHeader],
 ) -> GitCommitHash:
-    topic_commit_groups: List[Tuple[str, List[git.CommitHeader]]] = []
-    current_name: Optional[str] = None
-    current_group: List[git.CommitHeader] = []
+    topic_commit_groups: list[tuple[str, list[git.CommitHeader]]] = []
+    current_name: str | None = None
+    current_group: list[git.CommitHeader] = []
 
     for commit in to_restack:
         name = None

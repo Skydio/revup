@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import asyncio
 import logging
@@ -5,7 +7,6 @@ import re
 import shlex
 import subprocess
 from collections import defaultdict
-from typing import Dict, List, Optional, Set
 
 from revup import git, topic_stack
 from revup.core_types import (
@@ -28,7 +29,7 @@ with '{}' will be ignored, and an empty message aborts the amend."""
 
 async def invoke_editor_for_commit_msg(
     git_ctx: git.Git,
-    editor: Optional[str],
+    editor: str | None,
     topic_summary: str,
     commit_msg: str,
     cache_stat: str,
@@ -155,7 +156,7 @@ async def replay_cherry_pick(
 
 
 async def rebuild_stack_last_touched(
-    git_ctx: git.Git, stack: List[CommitHeader], staged_files: Set[str]
+    git_ctx: git.Git, stack: list[CommitHeader], staged_files: set[str]
 ) -> GitCommitHash:
     """
     Rebuild the stack, amending each staged file into the most recent commit that touched it.
@@ -164,7 +165,7 @@ async def rebuild_stack_last_touched(
     # Map each staged file to its most recent commit in the stack (ordered oldest-first).
     # -z gives NUL-terminated, unquoted paths so names with spaces, quotes, or unicode
     # match staged_files (also -z) exactly rather than git's default C-quoted form.
-    file_to_commit: Dict[str, int] = {}
+    file_to_commit: dict[str, int] = {}
     for i, commit_obj in enumerate(stack):
         touched = await git_ctx.git_stdout(
             "diff-tree",
@@ -179,7 +180,7 @@ async def rebuild_stack_last_touched(
             if f and f in staged_files:
                 file_to_commit[f] = i
 
-    commit_to_files: Dict[int, Set[str]] = defaultdict(set)
+    commit_to_files: dict[int, set[str]] = defaultdict(set)
     for f, idx in file_to_commit.items():
         commit_to_files[idx].add(f)
 
@@ -190,7 +191,7 @@ async def rebuild_stack_last_touched(
     # Get index entries for each staged file (format: <mode> <blob> <stage>\t<path>).
     # A staged deletion has no entry here; its path stays out of staged_entries so
     # the overlay omits it, which the pre-image merge base below turns into a removal.
-    staged_entries: Dict[str, str] = {}
+    staged_entries: dict[str, str] = {}
     ls_output = await git_ctx.git_stdout("ls-files", "--stage", "-z", "--", *files_to_amend)
     for line in ls_output.split("\0"):
         if not line:

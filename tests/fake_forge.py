@@ -1,5 +1,6 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
 
 from revup.forge import Forge, PrInfo, PrUpdate
 
@@ -18,23 +19,23 @@ class FakeForge(Forge):
     _repo_id: str = "repo_123"
 
     # Registered users: query string -> (node_id, full_login)
-    users: Dict[str, Tuple[str, str]] = field(default_factory=dict)
+    users: dict[str, tuple[str, str]] = field(default_factory=dict)
 
     # Registered labels: name -> node_id
-    labels: Dict[str, str] = field(default_factory=dict)
+    labels: dict[str, str] = field(default_factory=dict)
 
     # Registered teams: "org/slug" -> (node_id, member_logins)
-    teams: Dict[str, Tuple[str, Set[str]]] = field(default_factory=dict)
+    teams: dict[str, tuple[str, set[str]]] = field(default_factory=dict)
 
     # PRs that exist on the forge, keyed by headRef
-    prs: Dict[str, PrInfo] = field(default_factory=dict)
+    prs: dict[str, PrInfo] = field(default_factory=dict)
 
     # All known PR IDs (including closed/merged) to prevent reuse
-    _all_pr_ids: Set[str] = field(default_factory=set)
+    _all_pr_ids: set[str] = field(default_factory=set)
 
     # Tracking of operations performed
-    created_prs: List[PrInfo] = field(default_factory=list)
-    updated_prs: List[PrUpdate] = field(default_factory=list)
+    created_prs: list[PrInfo] = field(default_factory=list)
+    updated_prs: list[PrUpdate] = field(default_factory=list)
 
     _next_pr_id: int = field(default=1)
 
@@ -52,25 +53,25 @@ class FakeForge(Forge):
 
     async def query_everything(
         self,
-        head_refs: List[str],
-        user_ids: List[str],
-        labels: List[str],
-        teams: List[Tuple[str, str]],
-    ) -> Tuple[
+        head_refs: list[str],
+        user_ids: list[str],
+        labels: list[str],
+        teams: list[tuple[str, str]],
+    ) -> tuple[
         str,
-        List[Optional[PrInfo]],
-        Dict[str, str],
-        Dict[str, str],
-        Dict[str, str],
-        Dict[str, str],
-        Dict[str, Optional[Set[str]]],
+        list[PrInfo | None],
+        dict[str, str],
+        dict[str, str],
+        dict[str, str],
+        dict[str, str],
+        dict[str, set[str] | None],
     ]:
         assert head_refs, "query_everything called with no head_refs"
         assert len(head_refs) == len(set(head_refs)), "duplicate head_refs in query"
         assert len(user_ids) == len(set(user_ids)), "duplicate user_ids in query"
         assert len(labels) == len(set(labels)), "duplicate labels in query"
 
-        pr_results: List[Optional[PrInfo]] = []
+        pr_results: list[PrInfo | None] = []
         for ref in head_refs:
             assert ref, "empty head_ref in query"
             pr_results.append(self.prs.get(ref))
@@ -90,8 +91,8 @@ class FakeForge(Forge):
             if label in self.labels:
                 label_id_map[label] = self.labels[label]
 
-        team_id_map: Dict[str, str] = {}
-        team_members_map: Dict[str, Optional[Set[str]]] = {}
+        team_id_map: dict[str, str] = {}
+        team_members_map: dict[str, set[str] | None] = {}
         for org, slug in teams:
             assert org and slug, "empty org or slug in team query"
             ref = f"{org}/{slug}"
@@ -110,7 +111,7 @@ class FakeForge(Forge):
             team_members_map,
         )
 
-    async def create_pull_requests(self, repo_id: str, prs: List[PrInfo]) -> None:
+    async def create_pull_requests(self, repo_id: str, prs: list[PrInfo]) -> None:
         assert repo_id == self._repo_id, f"wrong repo_id: {repo_id}"
         assert prs, "create_pull_requests called with empty list"
 
@@ -138,10 +139,10 @@ class FakeForge(Forge):
             self.prs[pr.headRef] = pr
             self.created_prs.append(pr)
 
-    async def update_pull_requests(self, prs: List[PrUpdate]) -> None:
+    async def update_pull_requests(self, prs: list[PrUpdate]) -> None:
         assert prs, "update_pull_requests called with empty list"
 
-        seen_ids: Set[str] = set()
+        seen_ids: set[str] = set()
         for update in prs:
             assert update.id, "PrUpdate missing id"
             assert update.id not in seen_ids, f"duplicate update for PR {update.id}"
@@ -210,7 +211,7 @@ class FakeForge(Forge):
             target_pr.assignee_ids |= update.assignee_ids
             target_pr.label_ids |= update.label_ids
 
-    async def query_pr_by_number(self, owner: str, name: str, number: int) -> Tuple[str, str]:
+    async def query_pr_by_number(self, owner: str, name: str, number: int) -> tuple[str, str]:
         assert owner, "owner cannot be empty"
         assert name, "name cannot be empty"
         assert number > 0, f"invalid PR number: {number}"

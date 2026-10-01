@@ -8,7 +8,7 @@ import os
 import re
 import shutil
 import tempfile
-from typing import Any, Dict, List, Optional, Tuple, cast
+from typing import Any, Optional, Tuple, cast
 
 from async_lru import alru_cache as lru_cache
 
@@ -83,7 +83,7 @@ def parse_commit_header(raw_header: str) -> CommitHeader:
     )
 
 
-def parse_rev_list(s: str) -> List[CommitHeader]:
+def parse_rev_list(s: str) -> list[CommitHeader]:
     """
     Parses output of rev-list -v and returns a list of commits
     """
@@ -118,7 +118,7 @@ def get_default_git() -> str:
     return ret
 
 
-async def make_git(args: argparse.Namespace) -> "Git":
+async def make_git(args: argparse.Namespace) -> Git:
     sh = shell.Shell(not args.verbose)
     git_path = args.git_path
     git_version = args.git_version
@@ -141,7 +141,7 @@ async def make_git(args: argparse.Namespace) -> "Git":
             )
         return email
 
-    async def get_editor() -> Optional[str]:
+    async def get_editor() -> str | None:
         if editor:
             return editor
         # Defer to git's precedence order
@@ -224,7 +224,7 @@ class Git:
 
     # Git branch configuration
     main_branch: str
-    base_branch_globs: List[str]
+    base_branch_globs: list[str]
 
     # Whether to keep temporary files
     keep_temp: bool
@@ -243,7 +243,7 @@ class Git:
     author: str
 
     # Editor to use for message editing, or None if git couldn't resolve one
-    editor: Optional[str]
+    editor: str | None
 
     # Whether to GPG/SSH sign commits revup creates, from git config commit.gpgSign
     gpg_sign: bool
@@ -295,9 +295,9 @@ class Git:
         self,
         *args: str,
         no_config: bool = False,
-        env: Optional[Dict[str, str]] = None,
+        env: dict[str, str] | None = None,
         **kwargs: Any,
-    ) -> Tuple[int, str]:
+    ) -> tuple[int, str]:
         """
         Run a git command.  The returned stdout has trailing newlines stripped.
 
@@ -311,7 +311,7 @@ class Git:
         if env is not None:
             git_env.update(env)
 
-        def _maybe_rstrip(s: Tuple[int, str]) -> Tuple[int, str]:
+        def _maybe_rstrip(s: tuple[int, str]) -> tuple[int, str]:
             return (s[0], s[1].rstrip())
 
         return _maybe_rstrip(await self.sh.sh(*((self.git_path,) + args), env=git_env, **kwargs))
@@ -334,7 +334,7 @@ class Git:
     async def rev_list(
         self,
         include: str,
-        exclude: Optional[str] = None,
+        exclude: str | None = None,
         first_parent: bool = False,
         exclude_first_parent: bool = False,
         header: bool = False,
@@ -396,7 +396,7 @@ class Git:
         """
         return (await self.nearest_fork_point(ref, [baseRef]))[1]
 
-    async def nearest_fork_point(self, ref: str, baseRefs: List[str]) -> Tuple[int, GitCommitHash]:
+    async def nearest_fork_point(self, ref: str, baseRefs: list[str]) -> tuple[int, GitCommitHash]:
         """
         Like fork_point, but for many base branches at once. Excluding all of them from a
         single rev-list lists the commits that ref introduced over the nearest of them, so
@@ -473,12 +473,12 @@ class Git:
             return branch
         return branch[len(f"{self.remote_name}/") :]
 
-    async def branches_from_for_each_ref(self, ref_filters: List[str]) -> List[str]:
+    async def branches_from_for_each_ref(self, ref_filters: list[str]) -> list[str]:
         """
         Return the names of all remote branches that match the given for-each-ref patterns
         and options.
         """
-        ret: List[str] = []
+        ret: list[str] = []
         for ref in (
             await self.git_stdout("for-each-ref", "--format", "%(refname)", *ref_filters)
         ).split("\n"):
@@ -489,7 +489,7 @@ class Git:
 
     async def find_remote_branches(
         self, commit: str, limit_to_base_branches: bool, prune_old: bool
-    ) -> List[str]:
+    ) -> list[str]:
         """
         Finds all branches that are candidates for auto-detected base branch of the given commit.
         Optionally, limit_to_base_branches will only select those branches which match
@@ -497,7 +497,7 @@ class Git:
         prune_old will discard invalid branches to speed up the selection process.
         Return a list of branch names
         """
-        ref_filters: List[str] = []
+        ref_filters: list[str] = []
 
         if limit_to_base_branches:
             if not self.base_branch_globs:
@@ -523,7 +523,7 @@ class Git:
 
     async def get_best_base_branch_candidates(
         self, commit: str, limit_to_base_branches: bool = True, allow_self: bool = True
-    ) -> List[str]:
+    ) -> list[str]:
         """
         Find the best base branch for the given commit by listing candidate remote branches
         Return the branch(es) with the shortest distance from the commit to fork-point
@@ -615,7 +615,7 @@ class Git:
         """
         return GitTreeHash(await self.git_stdout("mktree", input_str=""))
 
-    async def make_tree_from_index_entries(self, entries: List[str]) -> GitTreeHash:
+    async def make_tree_from_index_entries(self, entries: list[str]) -> GitTreeHash:
         """
         Build a tree from raw `ls-files --stage` formatted index entries
         (`<mode> <blob> <stage>\\t<path>`), without touching any index.
@@ -626,7 +626,7 @@ class Git:
         """
         # Nested dict: dir name -> subtree dict, plus "" -> list of blob lines
         # for the files directly in that directory.
-        root: Dict[str, Any] = {}
+        root: dict[str, Any] = {}
         for entry in entries:
             meta, path = entry.split("\t", 1)
             mode, blob, _stage = meta.split(" ")
@@ -636,7 +636,7 @@ class Git:
                 node = node.setdefault(d, {})
             node.setdefault("", []).append(f"{mode} blob {blob}\t{name}")
 
-        async def build(node: Dict[str, Any]) -> GitTreeHash:
+        async def build(node: dict[str, Any]) -> GitTreeHash:
             lines = list(node.get("", []))
             for name, child in node.items():
                 if name == "":
@@ -649,7 +649,7 @@ class Git:
 
         return await build(root)
 
-    async def make_tree_from_paths(self, tree: GitTreeHash, paths: List[str]) -> GitTreeHash:
+    async def make_tree_from_paths(self, tree: GitTreeHash, paths: list[str]) -> GitTreeHash:
         """
         Build a tree containing only `paths`, each with the content it has in
         `tree`. Returns the empty tree if `paths` is empty.
@@ -674,8 +674,8 @@ class Git:
         merge_base: GitCommitHash,
         tree1: GitCommitHash,
         tree2: GitCommitHash,
-        strategy: Optional[str] = None,
-    ) -> Tuple[GitTreeHash, Optional[List[GitConflict]]]:
+        strategy: str | None = None,
+    ) -> tuple[GitTreeHash, list[GitConflict] | None]:
         """
         Run merge-tree and return the resulting tree hash and any conflicts.
         Conflicts is None if merge succeeded (ret 0), or a list (possibly empty) on conflict.
@@ -703,7 +703,7 @@ class Git:
         if ret == 0:
             return tree_hash, None
 
-        conflicts: List[GitConflict] = []
+        conflicts: list[GitConflict] = []
         informational = subsections[1]
         i = 0
         while i < len(informational) - 1:
@@ -758,7 +758,7 @@ class Git:
         tree2: GitCommitHash,
         new_commit_info: CommitHeader,
         merge_base: GitCommitHash,
-        strategy: Optional[str] = None,
+        strategy: str | None = None,
         ignore_conflicts: bool = False,
     ) -> GitCommitHash:
         """
@@ -796,7 +796,7 @@ class Git:
         Given a tree and file within the tree, print out all groups of conflict markers,
         prefixed with the starting and ending line numbers.
         """
-        groups: List[List[int]] = []
+        groups: list[list[int]] = []
         conflict_depth = 0
         lines = (await self.git_stdout("cat-file", "-p", f"{tree}:{path}")).split("\n")
         for lineno, line in enumerate(lines):
@@ -862,7 +862,7 @@ class Git:
         old_head: GitCommitHash,
         new_base: GitCommitHash,
         new_head: GitCommitHash,
-        parent: Optional[GitCommitHash],
+        parent: GitCommitHash | None,
     ) -> GitCommitHash:
         """
         Return a commit (optionally on top of parent) that provides a way to get the diff from old
@@ -892,7 +892,7 @@ class Git:
             old_head, new_base, new_commit_info, old_base, "ours", ignore_conflicts=True
         )
 
-    async def soft_reset(self, new_commit: GitCommitHash, env: Dict) -> None:
+    async def soft_reset(self, new_commit: GitCommitHash, env: dict) -> None:
         await self.git("reset", "--soft", new_commit, env=env)
 
         # TODO: only strictly needs to drop entries for HEAD
@@ -906,16 +906,16 @@ class Git:
 
 class Credential:
     git_ctx: Git
-    description: Dict[str, str]
+    description: dict[str, str]
 
-    def __init__(self, git: Git, description: Dict[str, str]):
+    def __init__(self, git: Git, description: dict[str, str]):
         self.git_ctx = git
         self.description = description
 
     def __getattr__(self, attr: str) -> Any:
         return self.description[attr]
 
-    async def _run(self, subcommand: str, args: Dict[str, str]) -> Dict[str, str]:
+    async def _run(self, subcommand: str, args: dict[str, str]) -> dict[str, str]:
         input_str = "\n".join(f"{k}={v}" for k, v in args.items())
         logging.debug("credential input:\n{}".format(input_str))
         stdout_str = await self.git_ctx.git_stdout(
