@@ -35,6 +35,10 @@ def _main() -> None:
             logging.error("Interrupted")
             sys.exit(130)
         finally:
+            if task.done() and not task.cancelled():
+                # Retrieve the task's exception so asyncio doesn't log it again with a
+                # traceback at shutdown.
+                task.exception()
             loop.close()
     except RevupUsageException as e:
         logging.error(str(e))
