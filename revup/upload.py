@@ -119,6 +119,12 @@ async def run(
 
     yield UploadPhase.COMMITS_CREATED, topics
 
+    if args.pre_upload and not args.no_verify:
+        ref_args = topics.get_pushed_ref_args()
+        if ref_args:
+            with get_console().status("Running pre-upload command"):
+                run_pre_upload(args.pre_upload, ref_args, git_ctx.repo_root)
+
     if args.dry_run:
         topics.print(not args.verbose)
         return
@@ -129,16 +135,11 @@ async def run(
             args.force_reviewers,
             args.pr_body_source,
         )
+
     if not args.skip_confirm and topics.num_reviews_changed() > 0:
         topics.print(not args.verbose)
         if git_ctx.sh.wait_for_confirmation():
             return
-
-    if args.pre_upload and not args.no_verify:
-        ref_args = topics.get_pushed_ref_args()
-        if ref_args:
-            with get_console().status("Running pre-upload command"):
-                run_pre_upload(args.pre_upload, ref_args, git_ctx.repo_root)
 
     yield UploadPhase.READY_TO_PUSH, topics
 
