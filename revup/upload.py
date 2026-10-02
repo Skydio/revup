@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import enum
+import logging
 import os
 import shlex
 import subprocess
@@ -33,6 +34,7 @@ def run_pre_upload(pre_upload: str, ref_args: list[str], repo_root: str) -> None
     if os.path.isfile(in_repo_root):
         command[0] = in_repo_root
 
+    logging.debug("Running pre-upload command: {}".format(" ".join(command)))
     try:
         result = subprocess.run(
             command,
@@ -44,6 +46,8 @@ def run_pre_upload(pre_upload: str, ref_args: list[str], repo_root: str) -> None
         )
     except OSError as exc:
         raise RevupShellException(f"Couldn't run pre-upload command: {exc}") from exc
+    if result.stdout:
+        logging.debug("Pre-upload output:\n{}".format(result.stdout.rstrip()))
     if result.returncode != 0:
         raise RevupShellException(
             f"Pre-upload command failed:\n{result.stdout}\n"
