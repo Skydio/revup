@@ -1,8 +1,10 @@
 """Unit tests for the Github class with a mocked GraphQL endpoint."""
 
+from __future__ import annotations
+
 import asyncio
 import time
-from typing import Any, Dict, List
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -40,14 +42,14 @@ def make_pr_node(
     head_oid: str = "abc123",
     num_commits: int = 1,
     is_draft: bool = False,
-    reviewers: List[Dict] = None,
-    team_reviewers: List[Dict] = None,
-    latest_reviews: List[Dict] = None,
-    assignees: List[Dict] = None,
-    labels: List[Dict] = None,
-    comments: List[Dict] = None,
-    timeline_items: List[Dict] = None,
-) -> Dict[str, Any]:
+    reviewers: list[dict] = None,
+    team_reviewers: list[dict] = None,
+    latest_reviews: list[dict] = None,
+    assignees: list[dict] = None,
+    labels: list[dict] = None,
+    comments: list[dict] = None,
+    timeline_items: list[dict] = None,
+) -> dict[str, Any]:
     review_requests = []
     for r in reviewers or []:
         review_requests.append({"requestedReviewer": r})
@@ -78,15 +80,15 @@ def make_pr_node(
     }
 
 
-def make_user_node(login: str = "alice", node_id: str = "U_1") -> Dict[str, Any]:
+def make_user_node(login: str = "alice", node_id: str = "U_1") -> dict[str, Any]:
     return {"nodes": [{"login": login, "id": node_id}], "totalCount": 1}
 
 
-def make_label_node(name: str = "bug", node_id: str = "L_1") -> Dict[str, Any]:
+def make_label_node(name: str = "bug", node_id: str = "L_1") -> dict[str, Any]:
     return {"id": node_id, "name": name}
 
 
-def make_team_node(team_id: str = "T_1", members: List[str] = None) -> Dict[str, Any]:
+def make_team_node(team_id: str = "T_1", members: list[str] = None) -> dict[str, Any]:
     if members is None:
         members = ["alice"]
     return {

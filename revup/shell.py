@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
@@ -5,19 +7,7 @@ import shlex
 import subprocess
 import sys
 import time
-from typing import (
-    IO,
-    Any,
-    Callable,
-    Coroutine,
-    Dict,
-    List,
-    Optional,
-    Sequence,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from typing import IO, Any, Callable, Coroutine, Sequence, TypeVar, Union
 
 _HANDLE = Union[None, int, IO[Any]]
 
@@ -47,17 +37,17 @@ K = TypeVar("K")
 V = TypeVar("V")
 
 
-def merge_dicts(x: Dict[K, V], y: Dict[K, V]) -> Dict[K, V]:
+def merge_dicts(x: dict[K, V], y: dict[K, V]) -> dict[K, V]:
     z = x.copy()
     z.update(y)
     return z
 
 
 async def process_stream(
-    proc_stream: Optional[asyncio.StreamReader],
+    proc_stream: asyncio.StreamReader | None,
     setting: _HANDLE,
     default_stream: IO[str],
-    transform: Optional[Callable[[bytes], bytes]],
+    transform: Callable[[bytes], bytes] | None,
 ) -> bytes:
     # The things we do for logging...
     #
@@ -103,9 +93,7 @@ async def process_stream(
     return b"".join(output)
 
 
-async def feed_input(
-    stdin_writer: Optional[asyncio.StreamWriter], input_str: Optional[str]
-) -> None:
+async def feed_input(stdin_writer: asyncio.StreamWriter | None, input_str: str | None) -> None:
     if stdin_writer is None:
         return
     if not input_str:
@@ -128,7 +116,7 @@ class Shell:
     def __init__(
         self,
         quiet: bool = True,
-        cwd: Optional[str] = None,
+        cwd: str | None = None,
     ):
         """
         Args:
@@ -145,14 +133,14 @@ class Shell:
     async def create_sh_task(
         self,
         *args: str,
-        env: Optional[Dict[str, str]] = None,
+        env: dict[str, str] | None = None,
         stderr: _HANDLE = None,
         # TODO: Arguably bytes should be accepted here too
-        input_str: Optional[str] = None,
+        input_str: str | None = None,
         stdin: _HANDLE = None,
         stdout: _HANDLE = subprocess.PIPE,
-        output_transform: Optional[Callable[[bytes], bytes]] = None,
-    ) -> Tuple[
+        output_transform: Callable[[bytes], bytes] | None = None,
+    ) -> tuple[
         Coroutine[Any, Any, None],
         Coroutine[Any, Any, bytes],
         Coroutine[Any, Any, bytes],
@@ -186,16 +174,16 @@ class Shell:
     async def sh(
         self,
         *args: str,
-        env: Optional[Dict[str, str]] = None,
+        env: dict[str, str] | None = None,
         stderr: _HANDLE = None,
         # TODO: Arguably bytes should be accepted here too
-        input_str: Optional[str] = None,
+        input_str: str | None = None,
         stdin: _HANDLE = None,
         stdout: _HANDLE = subprocess.PIPE,
         raiseonerror: bool = True,
         quiet: bool = False,
-        output_transform: Optional[Callable[[bytes], bytes]] = None,
-    ) -> Tuple[int, str]:
+        output_transform: Callable[[bytes], bytes] | None = None,
+    ) -> tuple[int, str]:
         """
         Run a command specified by args, and return string representing
         the stdout of the run command, raising an error if exit code
@@ -238,18 +226,18 @@ class Shell:
 
     async def piped_sh(
         self,
-        args1: List[str],
-        args2: List[str],
-        env1: Optional[Dict[str, str]] = None,
-        env2: Optional[Dict[str, str]] = None,
+        args1: list[str],
+        args2: list[str],
+        env1: dict[str, str] | None = None,
+        env2: dict[str, str] | None = None,
         stderr: _HANDLE = None,
         # TODO: Arguably bytes should be accepted here too
-        input_str: Optional[str] = None,
+        input_str: str | None = None,
         stdin: _HANDLE = None,
         stdout: _HANDLE = subprocess.PIPE,
         raiseonerror: bool = True,
         quiet: bool = False,
-    ) -> Tuple[int, str]:
+    ) -> tuple[int, str]:
         start_time = time.time()
         read, write = os.pipe()
         log_args = args1 + ["|"] + args2
@@ -289,7 +277,7 @@ class Shell:
         raiseonerror: bool,
         quiet: bool,
         *args: str,
-    ) -> Tuple[int, str]:
+    ) -> tuple[int, str]:
         if returncode and err:
             logging.warning(err.decode(errors="backslashreplace"))
         elif not quiet and debug_enabled() and err:

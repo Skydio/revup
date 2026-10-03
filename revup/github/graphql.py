@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 
 class GraphqlOperation(str, Enum):
@@ -28,7 +28,7 @@ class ErrorClass(Enum):
 
 # GraphQL error `type` values, mapped to how we treat the affected field.
 # Anything unmapped is treated as FATAL (fail loudly rather than silently retry).
-_ERROR_CLASS_BY_TYPE: Dict[str, ErrorClass] = {
+_ERROR_CLASS_BY_TYPE: dict[str, ErrorClass] = {
     "RESOURCE_LIMITS_EXCEEDED": ErrorClass.RETRYABLE,
     # A mutation whose effect already exists (a PR/comment/etc from a partial retry).
     "UNPROCESSABLE": ErrorClass.ALREADY_DONE,
@@ -43,8 +43,8 @@ class GraphqlError:
 
     message: str
     type: str  # "" if GitHub gave no type (usually a request/validation error)
-    path: List[Any]  # alias-first path
-    raw: Dict[str, Any]  # the original error object, for surfacing fatal errors
+    path: list[Any]  # alias-first path
+    raw: dict[str, Any]  # the original error object, for surfacing fatal errors
 
     @property
     def error_class(self) -> ErrorClass:
@@ -57,7 +57,7 @@ class GraphqlError:
         return "timeout" in self.message.lower() or "in time" in self.message.lower()
 
     @property
-    def alias(self) -> Optional[str]:
+    def alias(self) -> str | None:
         """The field alias this error is anchored to, if any.
 
         GitHub's path is alias-first for aliased fields (repo-scoped fields are not
@@ -78,7 +78,7 @@ class GraphqlResponse:
     """
 
     data: Any
-    errors: List[GraphqlError] = field(default_factory=list)
+    errors: list[GraphqlError] = field(default_factory=list)
 
     @classmethod
     def parse(cls, raw: Any) -> GraphqlResponse:
@@ -101,8 +101,8 @@ class SingleQuery:
     prefix: str
     scope: str  # "repo" | "top" | "mutation"
     field_template: str
-    var_types: List[str]
-    values: List[Any]
+    var_types: list[str]
+    values: list[Any]
     fragment: str
     index: int
     # False if re-sending this field would duplicate an effect it already applied.
@@ -121,10 +121,10 @@ class SingleQuery:
         var_names = [f"${self.var_name(j)}" for j in range(len(self.var_types))]
         return self.field_template.format(self.alias, *var_names)
 
-    def render_declarations(self) -> List[str]:
+    def render_declarations(self) -> list[str]:
         return [f"${self.var_name(j)}: {vtype}" for j, vtype in enumerate(self.var_types)]
 
-    def render_variables(self) -> Dict[str, Any]:
+    def render_variables(self) -> dict[str, Any]:
         return {self.var_name(j): val for j, val in enumerate(self.values)}
 
     def extract(self, result: Any) -> Any:
@@ -145,11 +145,11 @@ class GraphqlQuery:
     def __init__(self, operation: GraphqlOperation = GraphqlOperation.QUERY, name: str = ""):
         self.operation = operation
         self.name = name
-        self.fixed_vars: List[Tuple[str, str, Any]] = []
+        self.fixed_vars: list[tuple[str, str, Any]] = []
         self.fixed_repo_fields: str = ""
-        self.queries: List[SingleQuery] = []
+        self.queries: list[SingleQuery] = []
         # Per-prefix counter so each type's aliases are 0, 1, 2, ... and unique.
-        self._prefix_counts: Dict[str, int] = {}
+        self._prefix_counts: dict[str, int] = {}
 
     def add_fixed_var(self, name: str, gql_type: str, value: Any) -> None:
         self.fixed_vars.append((name, gql_type, value))
@@ -160,8 +160,8 @@ class GraphqlQuery:
         prefix: str,
         scope: str,
         field_template: str,
-        var_types: List[str],
-        values: List[Any],
+        var_types: list[str],
+        values: list[Any],
         fragment: str = "",
         replay_safe: bool = True,
     ) -> None:
@@ -188,21 +188,21 @@ class GraphqlQuery:
         """Whether the whole request can be re-sent when its response never arrived."""
         return all(q.replay_safe for q in self.queries)
 
-    def replay_unsafe_fields(self) -> List[Tuple[str, List[Any]]]:
+    def replay_unsafe_fields(self) -> list[tuple[str, list[Any]]]:
         """The alias and variable values of every field that can't be re-sent."""
         return [(q.alias, list(q.values)) for q in self.queries if not q.replay_safe]
 
-    def extract(self, result: Any, prefix: str) -> List[Any]:
+    def extract(self, result: Any, prefix: str) -> list[Any]:
         """Return the result node for every field with the given prefix, in add order."""
         return [q.extract(result) for q in self.queries if q.prefix == prefix]
 
-    def unfulfilled_aliases(self, result: Any) -> Set[str]:
+    def unfulfilled_aliases(self, result: Any) -> set[str]:
         """Aliases whose result is null or absent in `result`.
 
         For a mutation this means the field did not apply (a completed mutation
         returns its payload); for a query it means the field did not resolve.
         """
-        missing: Set[str] = set()
+        missing: set[str] = set()
         for q in self.queries:
             try:
                 node = q.extract(result)
@@ -215,9 +215,9 @@ class GraphqlQuery:
     def total_items(self) -> int:
         return len(self.queries)
 
-    def build(self) -> Tuple[str, Dict[str, Any]]:
-        all_decls: List[str] = []
-        variables: Dict[str, Any] = {}
+    def build(self) -> tuple[str, dict[str, Any]]:
+        all_decls: list[str] = []
+        variables: dict[str, Any] = {}
 
         for name, gql_type, value in self.fixed_vars:
             all_decls.append(f"${name}: {gql_type}")
@@ -276,12 +276,12 @@ class GraphqlQuery:
         clone.fixed_repo_fields = self.fixed_repo_fields
         return clone
 
-    def _with_fields(self, fields: List[SingleQuery]) -> GraphqlQuery:
+    def _with_fields(self, fields: list[SingleQuery]) -> GraphqlQuery:
         clone = self._empty_clone()
         clone.queries = fields
         return clone
 
-    def split(self) -> Tuple[GraphqlQuery, GraphqlQuery]:
+    def split(self) -> tuple[GraphqlQuery, GraphqlQuery]:
         """Split the flat field list in half.
 
         Each half may be heterogeneous in field type. Aliases are baked into each
@@ -292,7 +292,7 @@ class GraphqlQuery:
         mid = (len(self.queries) + 1) // 2
         return self._with_fields(self.queries[:mid]), self._with_fields(self.queries[mid:])
 
-    def subset(self, aliases: Set[str]) -> GraphqlQuery:
+    def subset(self, aliases: set[str]) -> GraphqlQuery:
         """A query containing only the fields whose alias is in `aliases`.
 
         Fields keep their original alias index, so results merge back without
@@ -300,6 +300,6 @@ class GraphqlQuery:
         """
         return self._with_fields([q for q in self.queries if q.alias in aliases])
 
-    def without(self, aliases: Set[str]) -> GraphqlQuery:
+    def without(self, aliases: set[str]) -> GraphqlQuery:
         """A query containing every field whose alias is not in `aliases`."""
         return self._with_fields([q for q in self.queries if q.alias not in aliases])

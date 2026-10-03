@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 import logging
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 from revup.core_types import RevupForgeException, RevupRequestException
 from revup.forge import (
@@ -132,7 +134,7 @@ _MAX_STALLED_RETRIES = 2
 MAX_COMMENTS_TO_CHECK = 20
 
 
-def _merge_data(into: Dict[str, Any], src: Any) -> None:
+def _merge_data(into: dict[str, Any], src: Any) -> None:
     """Merge GraphQL `data` dict `src` into `into`, combining nested repository fields."""
     if not src:
         return
@@ -146,7 +148,7 @@ def _merge_data(into: Dict[str, Any], src: Any) -> None:
 class GithubQuery(GraphqlQuery):
     """A GraphqlQuery with GitHub-specific field builders and result parsers."""
 
-    def add_pr_queries(self, head_refs: List[str]) -> None:
+    def add_pr_queries(self, head_refs: list[str]) -> None:
         for ref in head_refs:
             self.add(
                 prefix="pr",
@@ -160,7 +162,7 @@ class GithubQuery(GraphqlQuery):
                 fragment=PR_FRAGMENT,
             )
 
-    def add_user_queries(self, user_ids: List[str]) -> None:
+    def add_user_queries(self, user_ids: list[str]) -> None:
         for uid in user_ids:
             self.add(
                 prefix="user",
@@ -171,7 +173,7 @@ class GithubQuery(GraphqlQuery):
                 fragment=USER_FRAGMENT,
             )
 
-    def add_label_queries(self, labels: List[str]) -> None:
+    def add_label_queries(self, labels: list[str]) -> None:
         for label in labels:
             self.add(
                 prefix="label",
@@ -182,7 +184,7 @@ class GithubQuery(GraphqlQuery):
                 fragment=LABEL_FRAGMENT,
             )
 
-    def add_team_queries(self, teams: List[Tuple[str, str]]) -> None:
+    def add_team_queries(self, teams: list[tuple[str, str]]) -> None:
         for org, slug in teams:
             self.add(
                 prefix="team",
@@ -196,7 +198,7 @@ class GithubQuery(GraphqlQuery):
                 values=[org, slug],
             )
 
-    def add_comment_queries(self, subject_ids: List[str]) -> None:
+    def add_comment_queries(self, subject_ids: list[str]) -> None:
         for subject_id in subject_ids:
             self.add(
                 prefix="coms",
@@ -208,21 +210,21 @@ class GithubQuery(GraphqlQuery):
                 values=[subject_id],
             )
 
-    def parse_prs(self, result: Any, head_refs: List[str]) -> List[Optional[PrInfo]]:
+    def parse_prs(self, result: Any, head_refs: list[str]) -> list[PrInfo | None]:
         raw = self.extract(result, "pr")
-        prs: List[Optional[PrInfo]] = []
+        prs: list[PrInfo | None] = []
         for i, branch_name in enumerate(head_refs):
             this_node = raw[i]
             if len(this_node["nodes"]) == 1:
                 this_node = this_node["nodes"][0]
-                pr_labels: Set[str] = set()
-                pr_label_ids: Set[str] = set()
-                reviewers: Set[str] = set()
-                reviewer_ids: Set[str] = set()
-                reviewer_teams: Set[str] = set()
-                reviewer_team_ids: Set[str] = set()
-                assignees: Set[str] = set()
-                assignee_ids: Set[str] = set()
+                pr_labels: set[str] = set()
+                pr_label_ids: set[str] = set()
+                reviewers: set[str] = set()
+                reviewer_ids: set[str] = set()
+                reviewer_teams: set[str] = set()
+                reviewer_team_ids: set[str] = set()
+                assignees: set[str] = set()
+                assignee_ids: set[str] = set()
                 for label in this_node["labels"]["nodes"]:
                     pr_labels.add(label["name"])
                     pr_label_ids.add(label["id"])
@@ -250,10 +252,10 @@ class GithubQuery(GraphqlQuery):
                 for c in this_node["comments"]["nodes"]:
                     comments.append(PrComment(c["body"], c["id"]))
 
-                removed_reviewers: Set[str] = set()
-                removed_reviewer_ids: Set[str] = set()
-                removed_assignees: Set[str] = set()
-                removed_assignee_ids: Set[str] = set()
+                removed_reviewers: set[str] = set()
+                removed_reviewer_ids: set[str] = set()
+                removed_assignees: set[str] = set()
+                removed_assignee_ids: set[str] = set()
                 for event in this_node["timelineItems"]["nodes"]:
                     rr = event.get("requestedReviewer")
                     if rr and "login" in rr and rr["login"] not in reviewers:
@@ -296,11 +298,11 @@ class GithubQuery(GraphqlQuery):
         return prs
 
     def parse_users(
-        self, result: Any, user_ids: List[str]
-    ) -> Tuple[Dict[str, str], Dict[str, str]]:
+        self, result: Any, user_ids: list[str]
+    ) -> tuple[dict[str, str], dict[str, str]]:
         raw = self.extract(result, "user")
-        names_to_ids: Dict[str, str] = {}
-        names_to_logins: Dict[str, str] = {}
+        names_to_ids: dict[str, str] = {}
+        names_to_logins: dict[str, str] = {}
         for i, user_id in enumerate(user_ids):
             this_node = raw[i]
             if len(this_node["nodes"]) == 0:
@@ -331,9 +333,9 @@ class GithubQuery(GraphqlQuery):
                     )
         return names_to_ids, names_to_logins
 
-    def parse_labels(self, result: Any, labels: List[str]) -> Dict[str, str]:
+    def parse_labels(self, result: Any, labels: list[str]) -> dict[str, str]:
         raw = self.extract(result, "label")
-        labels_to_ids: Dict[str, str] = {}
+        labels_to_ids: dict[str, str] = {}
         for i, label in enumerate(labels):
             this_node = raw[i]
             if this_node is not None:
@@ -343,20 +345,20 @@ class GithubQuery(GraphqlQuery):
         return labels_to_ids
 
     def parse_comment_bodies(
-        self, result: Any, subject_ids: List[str]
-    ) -> Dict[str, Optional[Set[str]]]:
+        self, result: Any, subject_ids: list[str]
+    ) -> dict[str, set[str] | None]:
         """Bodies of each subject's newest comments, or None if github didn't return them."""
-        bodies: Dict[str, Optional[Set[str]]] = {}
+        bodies: dict[str, set[str] | None] = {}
         for subject_id, node in zip(subject_ids, self.extract(result, "coms")):
             bodies[subject_id] = {c["body"] for c in node["comments"]["nodes"]} if node else None
         return bodies
 
     def parse_teams(
-        self, result: Any, teams: List[Tuple[str, str]]
-    ) -> Tuple[Dict[str, str], Dict[str, Optional[Set[str]]]]:
+        self, result: Any, teams: list[tuple[str, str]]
+    ) -> tuple[dict[str, str], dict[str, set[str] | None]]:
         raw = self.extract(result, "team")
-        teams_to_ids: Dict[str, str] = {}
-        teams_to_members: Dict[str, Optional[Set[str]]] = {}
+        teams_to_ids: dict[str, str] = {}
+        teams_to_members: dict[str, set[str] | None] = {}
         for i, (org, slug) in enumerate(teams):
             team_node = raw[i]
             if team_node is not None and team_node["team"] is not None:
@@ -401,10 +403,10 @@ class Github(Forge):
 
     def _make_query_everything(
         self,
-        head_refs: List[str],
-        user_ids: List[str],
-        labels: List[str],
-        teams: List[Tuple[str, str]],
+        head_refs: list[str],
+        user_ids: list[str],
+        labels: list[str],
+        teams: list[tuple[str, str]],
     ) -> GithubQuery:
         q = GithubQuery(name="GetEverything")
         q.add_fixed_var("owner", "String!", self.repo_info.owner)
@@ -440,7 +442,7 @@ class Github(Forge):
             return GraphqlResponse(data={})
         return await self._run_once(remaining, attempts - 1)
 
-    async def _comments_already_added(self, q: GraphqlQuery) -> Set[str]:
+    async def _comments_already_added(self, q: GraphqlQuery) -> set[str]:
         """Aliases of the mutation's comment fields that must not be sent again.
 
         A comment not positively shown as missing counts as added, since a duplicate is
@@ -461,7 +463,7 @@ class Github(Forge):
                 added.add(alias)
         return added
 
-    async def _execute(self, q: GraphqlQuery) -> Dict[str, Any]:
+    async def _execute(self, q: GraphqlQuery) -> dict[str, Any]:
         """Run a query/mutation, salvaging partial results and re-transacting the rest.
 
         Returns the merged `data` for every field that ultimately succeeded. Fields
@@ -472,10 +474,10 @@ class Github(Forge):
         Only never-computed fields are ever re-sent, so mutations with real side
         effects (created PRs, posted comments) are never re-executed.
         """
-        merged: Dict[str, Any] = {}
-        fatal: List[Any] = []
+        merged: dict[str, Any] = {}
+        fatal: list[Any] = []
         # Queue of (subquery, attempts_without_progress). Start with the whole thing.
-        pending: List[Tuple[GraphqlQuery, int]] = [(q, 0)]
+        pending: list[tuple[GraphqlQuery, int]] = [(q, 0)]
         while pending:
             sub, stalls = pending.pop()
             if sub.total_items() == 0:
@@ -487,7 +489,7 @@ class Github(Forge):
             # effect applied); a null field did not. This is the source of truth for
             # what to resubmit, so a completed mutation is never re-sent.
             unfulfilled = sub.unfulfilled_aliases({"data": merged})
-            errors_by_alias: Dict[str, GraphqlError] = {}
+            errors_by_alias: dict[str, GraphqlError] = {}
             timed_out = False
             for err in resp.errors:
                 if err.error_class is ErrorClass.INFORMATIONAL:
@@ -499,7 +501,7 @@ class Github(Forge):
                 else:
                     fatal.append(err.raw)  # request-level error with nothing to salvage
 
-            resubmit: Set[str] = set()
+            resubmit: set[str] = set()
             too_big = False  # a resource limit means the request must shrink, not just retry
             for alias in unfulfilled:
                 field_err = errors_by_alias.get(alias)
@@ -556,18 +558,18 @@ class Github(Forge):
 
     async def query_everything(
         self,
-        head_refs: List[str],
-        user_ids: List[str],
-        labels: List[str],
-        teams: List[Tuple[str, str]],
-    ) -> Tuple[
+        head_refs: list[str],
+        user_ids: list[str],
+        labels: list[str],
+        teams: list[tuple[str, str]],
+    ) -> tuple[
         str,
-        List[Optional[PrInfo]],
-        Dict[str, str],
-        Dict[str, str],
-        Dict[str, str],
-        Dict[str, str],
-        Dict[str, Optional[Set[str]]],
+        list[PrInfo | None],
+        dict[str, str],
+        dict[str, str],
+        dict[str, str],
+        dict[str, str],
+        dict[str, set[str] | None],
     ]:
         q = self._make_query_everything(head_refs, user_ids, labels, teams)
 
@@ -589,7 +591,7 @@ class Github(Forge):
             teams_to_members,
         )
 
-    async def create_pull_requests(self, repo_id: str, prs: List[PrInfo]) -> None:
+    async def create_pull_requests(self, repo_id: str, prs: list[PrInfo]) -> None:
         inputs = []
         for pr in prs:
             headRef = pr.headRef if not self.is_fork else f"{self.fork_info.owner}:{pr.headRef}"
@@ -636,7 +638,7 @@ class Github(Forge):
         if missing:
             await self._populate_existing_pr_ids(missing)
 
-    async def _populate_existing_pr_ids(self, prs: List[PrInfo]) -> None:
+    async def _populate_existing_pr_ids(self, prs: list[PrInfo]) -> None:
         q = GithubQuery(name="FindExisting")
         q.add_fixed_var("owner", "String!", self.repo_info.owner)
         q.add_fixed_var("name", "String!", self.repo_info.name)
@@ -650,10 +652,10 @@ class Github(Forge):
                 pr.id = nodes[0]["id"]
                 pr.url = nodes[0]["url"]
 
-    async def update_pull_requests(self, prs: List[PrUpdate]) -> None:
+    async def update_pull_requests(self, prs: list[PrUpdate]) -> None:
         await self._execute(self._build_update_mutation(prs))
 
-    def _build_update_mutation(self, prs: List[PrUpdate]) -> GraphqlQuery:
+    def _build_update_mutation(self, prs: list[PrUpdate]) -> GraphqlQuery:
         inputs = []
         labels = []
         reviewers = []
@@ -663,7 +665,7 @@ class Github(Forge):
         comments = []
         edit_comments = []
         for pr in prs:
-            update_dict: Dict[str, Any] = {
+            update_dict: dict[str, Any] = {
                 "clientMutationId": "revup",
                 "pullRequestId": pr.id,
             }
@@ -740,7 +742,7 @@ class Github(Forge):
             prefix: str,
             mutation: str,
             var_type: str,
-            items: List[Any],
+            items: list[Any],
             replay_safe: bool = True,
         ) -> None:
             for inp in items:
@@ -776,7 +778,7 @@ class Github(Forge):
         add_all("edit_com", "updateIssueComment", "UpdateIssueCommentInput!", edit_comments)
         return q
 
-    async def query_pr_by_number(self, owner: str, name: str, number: int) -> Tuple[str, str]:
+    async def query_pr_by_number(self, owner: str, name: str, number: int) -> tuple[str, str]:
         result = await self.endpoint.graphql(
             query="""\
 query ($owner: String!, $name: String!, $number: Int!) {

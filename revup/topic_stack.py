@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional, Set, Tuple
+from typing import Iterator
 
 from rich import get_console
 from rich.markup import escape
@@ -99,7 +99,7 @@ PATCHSETS_FIRST_LINE = "| # | head | base | diff | date | summary |\r\n| - | - |
 REVIEW_GRAPH_FIRST_LINE = "Reviews in this chain:\r\n"
 
 
-def match_commit_tag(line: str) -> Optional[Tuple[str, Set[str]]]:
+def match_commit_tag(line: str) -> tuple[str, set[str]] | None:
     """
     Return the tag name and values of a line containing a valid tag, or None if the line
     isn't one.
@@ -143,7 +143,7 @@ def trim_nonidentifying_tags(commit_msg: str) -> str:
     return "\n".join(ret).strip()
 
 
-def get_bool_tag(tags: Dict[str, Set[str]], tag: str, default: bool = False) -> bool:
+def get_bool_tag(tags: dict[str, set[str]], tag: str, default: bool = False) -> bool:
     """
     Return the value of a tag that accepts the same boolean values as config options,
     or the default if the tag isn't given.
@@ -156,7 +156,7 @@ def get_bool_tag(tags: Dict[str, Set[str]], tag: str, default: bool = False) -> 
     return value == "true"
 
 
-def add_tags(original: Dict[str, Set[str]], new: Dict[str, Set[str]]) -> None:
+def add_tags(original: dict[str, set[str]], new: dict[str, set[str]]) -> None:
     """
     Update original with tags from new.
     """
@@ -164,7 +164,7 @@ def add_tags(original: Dict[str, Set[str]], new: Dict[str, Set[str]]) -> None:
         original[tag].update(val)
 
 
-def translate_if_exists(names: Set[str], translation: Dict[str, str]) -> Set[str]:
+def translate_if_exists(names: set[str], translation: dict[str, str]) -> set[str]:
     """
     Return the translation entry for each name, only if it exists.
     """
@@ -216,12 +216,12 @@ class Review:
     topic: Topic
 
     # The local base ref that is the parent of all commits in new_commits
-    base_ref: Optional[GitCommitHash] = None
+    base_ref: GitCommitHash | None = None
 
     # The commits actually used for the review. These may have been created
     # by cherry-picking. The last commit is the one that will be pushed to the
     # remote ref.
-    new_commits: List[GitCommitHash] = field(default_factory=list)
+    new_commits: list[GitCommitHash] = field(default_factory=list)
 
     # Name for the remote head ref. Will be based on topic name + base branch
     remote_head: str = ""
@@ -233,10 +233,10 @@ class Review:
     relative_branch: str = ""
 
     # List of commits the remote has for this review
-    remote_commits: List[git.CommitHeader] = field(default_factory=list)
+    remote_commits: list[git.CommitHeader] = field(default_factory=list)
 
     # Existing PR details for this review. None if no PR currently exists
-    pr_info: Optional[PrInfo] = None
+    pr_info: PrInfo | None = None
 
     # PR update argument for this review
     pr_update: PrUpdate = field(default_factory=PrUpdate)
@@ -251,7 +251,7 @@ class Review:
     push_status: PushStatus = PushStatus.PUSHED
 
     # Other reviews that have marked this one as relative.
-    children: List[Review] = field(default_factory=list)
+    children: list[Review] = field(default_factory=list)
 
     # Whether a PR is a draft
     is_draft: bool = False
@@ -261,8 +261,8 @@ class Review:
 
     # Comment indexes identify a matching comment for the given feature to update.
     # If greater than len(pr_info.comments), identifies a new comment.
-    review_graph_index: Optional[int] = None
-    patchsets_index: Optional[int] = None
+    review_graph_index: int | None = None
+    patchsets_index: int | None = None
 
 
 @dataclass
@@ -276,19 +276,19 @@ class Topic:
     name: str
 
     # The local topic that this topic is relative to
-    relative_topic: Optional[Topic] = None
+    relative_topic: Topic | None = None
 
     # Original commits included in this topic
-    original_commits: List[git.CommitHeader] = field(default_factory=list)
+    original_commits: list[git.CommitHeader] = field(default_factory=list)
 
     # Tags for this topic (union of all tags for commits in the topic)
-    tags: Dict[str, Set[str]] = field(default_factory=lambda: defaultdict(set))
+    tags: dict[str, set[str]] = field(default_factory=lambda: defaultdict(set))
 
     # Reviews for this topic, keyed by base branch
-    reviews: Dict[str, Review] = field(default_factory=dict)
+    reviews: dict[str, Review] = field(default_factory=dict)
 
     def depth_first_iter(self) -> Iterator[Topic]:
-        def depth_first_iter_helper(topic: Topic, seen: Set[str]) -> Iterator[Topic]:
+        def depth_first_iter_helper(topic: Topic, seen: set[str]) -> Iterator[Topic]:
             if topic.name in seen:
                 raise RevupUsageException(
                     f'Unexpected relative topic cycle at "{topic.name}" chain includes {seen}'
@@ -317,41 +317,41 @@ class TopicStack:
     relative_branch: str
 
     # Forge interface for PR operations
-    forge: Optional[Forge] = None
+    forge: Forge | None = None
 
     # Commit at the head of the branch to be uploaded
     head: str = "HEAD"
 
     # Original list of relevant commits given to the submitter
-    commits: List[git.CommitHeader] = field(default_factory=list)
+    commits: list[git.CommitHeader] = field(default_factory=list)
 
     # Topic names to topic info
-    topics: Dict[str, Topic] = field(default_factory=dict)
+    topics: dict[str, Topic] = field(default_factory=dict)
 
     # Forge node id of the repo
-    repo_id: Optional[str] = None
+    repo_id: str | None = None
 
     # Forge node ids of users (reviewer/assignee)
-    names_to_ids: Optional[Dict[str, str]] = None
+    names_to_ids: dict[str, str] | None = None
 
     # Full login names of users
-    names_to_logins: Optional[Dict[str, str]] = None
+    names_to_logins: dict[str, str] | None = None
 
     # Forge node ids of labels
-    labels_to_ids: Optional[Dict[str, str]] = None
+    labels_to_ids: dict[str, str] | None = None
 
     # Forge node ids of teams, keyed by "org/slug"
-    teams_to_ids: Optional[Dict[str, str]] = None
+    teams_to_ids: dict[str, str] | None = None
 
     # Team member logins keyed by "org/slug". None means the team is too large to
     # enumerate fully, and membership should be treated as unknown.
-    teams_to_members: Optional[Dict[str, Optional[Set[str]]]] = None
+    teams_to_members: dict[str, set[str] | None] | None = None
 
     # Relative branch names to pr_info for those branches
-    relative_infos: Dict[str, PrInfo] = field(default_factory=dict)
+    relative_infos: dict[str, PrInfo] = field(default_factory=dict)
 
     # All virtual diff targets for the current upload are chained into a dummy branch
-    last_virtual_diff_target: Optional[GitCommitHash] = None
+    last_virtual_diff_target: GitCommitHash | None = None
 
     # Whether populate() was successfully called
     populated: bool = False
@@ -359,7 +359,7 @@ class TopicStack:
     # Whether to work around forge issues with reordering by pushing a dummy commit
     use_reordering_workaround = False
 
-    def all_reviews_iter(self) -> Iterator[Tuple[str, Topic, str, Review]]:
+    def all_reviews_iter(self) -> Iterator[tuple[str, Topic, str, Review]]:
         """
         One liner for common iteration pattern to reduce indentation a bit.
         """
@@ -367,12 +367,12 @@ class TopicStack:
             for base_branch, review in topic.reviews.items():
                 yield name, topic, base_branch, review
 
-    def topological_topics(self) -> Iterator[Tuple[str, Topic]]:
+    def topological_topics(self) -> Iterator[tuple[str, Topic]]:
         """
         Iterate through all topics one at a time with the requirement that any topic must always
         come after a topic it is relative to.
         """
-        seen: Set[str] = set()
+        seen: set[str] = set()
         for topic in self.topics.values():
             for t in topic.depth_first_iter():
                 if t.name in seen:
@@ -380,7 +380,7 @@ class TopicStack:
                 seen.add(t.name)
                 yield t.name, t
 
-    def parse_commit_tags(self, commit_msg: str) -> Tuple[Dict[str, Set[str]], str]:
+    def parse_commit_tags(self, commit_msg: str) -> tuple[dict[str, set[str]], str]:
         """
         Parse all commit tags in the commit message and return them in a dict, as well as
         a version of the message with commit tags removed.
@@ -401,8 +401,8 @@ class TopicStack:
         return ret, "\n".join(trimmed_msg).strip()
 
     async def create_patchsets_comment(
-        self, review: Review, orig: Optional[PrComment]
-    ) -> Optional[PrComment]:
+        self, review: Review, orig: PrComment | None
+    ) -> PrComment | None:
         if (
             review.push_status != PushStatus.PUSHED
             or review.status == PrStatus.MERGED
@@ -552,7 +552,7 @@ class TopicStack:
                 add_tags(self.topics[name].tags, parsed_tags)
         self.populated = True
 
-    def relative_ancestors(self, limit_topics: List[str]) -> Set[str]:
+    def relative_ancestors(self, limit_topics: list[str]) -> set[str]:
         """
         Return the given topics along with topics they are transitively relative to, which
         must also be uploaded so that their branches exist and are up to date.
@@ -571,11 +571,11 @@ class TopicStack:
     async def populate_reviews(
         self,
         force_relative_chain: bool = False,
-        labels: Optional[str] = None,
+        labels: str | None = None,
         user_aliases: str = "",
         auto_add_users: str = "",
         self_authored_only: bool = False,
-        limit_topics: Optional[List[str]] = None,
+        limit_topics: list[str] | None = None,
     ) -> None:
         """
         Populate reviews for already-parsed topics. Verify base branch and relative topic info to
@@ -1152,12 +1152,12 @@ class TopicStack:
             return
 
         # Collect the set of branches we're pushing this run
-        pushing_branches: Set[str] = set()
+        pushing_branches: set[str] = set()
         for _, _, _, review in self.all_reviews_iter():
             if review.push_status == PushStatus.PUSHED and review.status != PrStatus.MERGED:
                 pushing_branches.add(review.remote_head)
 
-        orphaned_updates: List[PrUpdate] = []
+        orphaned_updates: list[PrUpdate] = []
         for _, _, base_branch, review in self.all_reviews_iter():
             if not review.pr_info or review.status == PrStatus.MERGED:
                 continue
@@ -1184,7 +1184,7 @@ class TopicStack:
         if orphaned_updates:
             await self.forge.update_pull_requests(orphaned_updates)
 
-    def get_pushed_ref_args(self) -> List[str]:
+    def get_pushed_ref_args(self) -> list[str]:
         """
         Return "baseSHA:headSHA:baserefname:headrefname" for each ref that will be pushed.
         """
@@ -1271,7 +1271,7 @@ class TopicStack:
 
         pr_targets = []
         user_ids = set()
-        team_refs: Set[str] = set()
+        team_refs: set[str] = set()
         labels = set()
         for _, topic, base_branch, review in self.all_reviews_iter():
             pr_targets.append(review.remote_head)
@@ -1335,7 +1335,7 @@ class TopicStack:
                 self.relative_infos[pr_targets[i]] = pr_info
             i += 1
 
-    def _get_pr_body_and_title(self, topic: Topic, pr_body_source: PrBodySource) -> Tuple[str, str]:
+    def _get_pr_body_and_title(self, topic: Topic, pr_body_source: PrBodySource) -> tuple[str, str]:
         first_msg = topic.original_commits[0].commit_msg
         title = first_msg.split("\n", 1)[0]
 
@@ -1507,12 +1507,12 @@ class TopicStack:
                 review.pr_info.assignees |= assignee_logins
                 review.pr_info.labels |= valid_labels
 
-    def create_review_graph(self) -> Dict[str, List[str]]:
+    def create_review_graph(self) -> dict[str, list[str]]:
         """
         Return a dict of remote branch names to a string containing a graph-formatted
         representation of the entire relative review structure in that chain.
         """
-        ret: Dict[str, List[str]] = {}
+        ret: dict[str, list[str]] = {}
 
         def graph_helper(review: Review, back: str, prefix: str) -> int:
             if review.pr_info is None:

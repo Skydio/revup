@@ -7,7 +7,7 @@ import os
 import stat
 import subprocess
 import sys
-from typing import Any, List, Tuple
+from typing import Any
 
 from revup import config, git, logs, shell
 from revup.completion import (
@@ -117,7 +117,7 @@ def dump_args(args: argparse.Namespace) -> None:
         logging.debug(json.dumps(vars(args), default=str, indent=2))
 
 
-def build_parser() -> Tuple[RevupArgParser, List[RevupArgParser]]:
+def build_parser() -> tuple[RevupArgParser, list[RevupArgParser]]:
     """Build the argument parser and all subparsers. Must be called before the event loop starts
     so that argcomplete completers can use asyncio.run()."""
     revup_parser = make_toplevel_parser()
@@ -147,7 +147,7 @@ def build_parser() -> Tuple[RevupArgParser, List[RevupArgParser]]:
     install_completion_parser.add_argument("--rc-file")
 
     # Intentionally does not contain config or toolkit parsers since the those are not configurable
-    all_parsers: List[RevupArgParser] = [
+    all_parsers: list[RevupArgParser] = [
         revup_parser,
         amend_parser,
         cherry_pick_parser,
@@ -325,7 +325,7 @@ def build_parser() -> Tuple[RevupArgParser, List[RevupArgParser]]:
     return revup_parser, all_parsers
 
 
-async def main(revup_parser: RevupArgParser, all_parsers: List[RevupArgParser]) -> int:
+async def main(revup_parser: RevupArgParser, all_parsers: list[RevupArgParser]) -> int:
     # Do an initial parsing pass, which handles HelpAction
     args = revup_parser.parse_args()
     conf = await get_config()
