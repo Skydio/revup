@@ -1,5 +1,6 @@
 # PYTHON_ARGCOMPLETE_OK
 import asyncio
+import contextlib
 import logging
 import sys
 
@@ -27,10 +28,8 @@ def _main() -> None:
             sys.exit(loop.run_until_complete(task))
         except KeyboardInterrupt:
             task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError, KeyboardInterrupt):
                 loop.run_until_complete(task)
-            except (asyncio.CancelledError, KeyboardInterrupt):
-                pass
             # Exit code of 130 is the shell convention for death by sigint.
             logging.error("Interrupted")
             sys.exit(130)

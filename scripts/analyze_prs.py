@@ -8,7 +8,8 @@ import dateutil.relativedelta
 
 # A script for analyzing the revup usage within a particular repo. To use, first query github
 # with the command
-# gh pr list --state merged --json author --json headRefName --json mergedAt --json number --limit 20000 > pr_list.json
+# gh pr list --state merged --json author --json headRefName --json mergedAt --json number \
+#   --limit 20000 > pr_list.json
 # (set the limit as needed to be greater than the total prs in your repo)
 # Running this script will show you how many prs out of the total were made with revup, and will
 # show the top contributors by pr count.
@@ -37,9 +38,8 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    text = open(args.filename).read()
-
-    all_prs = json.loads(text)
+    with open(args.filename) as prs_file:
+        all_prs = json.load(prs_file)
 
     users = {}
 
@@ -76,17 +76,12 @@ if __name__ == "__main__":
             del users[user]
     args.num_users = min(args.num_users, len(users))
 
-    print("Total PRs: {}".format(total))
-    print("Total revup PRs: {} ({:.1f}%)".format(total_revup, 100.0 * total_revup / total))
-    print(
-        "Top {} contributors by number of {}prs".format(
-            args.num_users, "revup " if args.sort_by_revup else ""
-        )
-    )
+    sort_str = "revup " if args.sort_by_revup else ""
+    print(f"Total PRs: {total}")
+    print(f"Total revup PRs: {total_revup} ({100.0 * total_revup / total:.1f}%)")
+    print(f"Top {args.num_users} contributors by number of {sort_str}prs")
 
-    users_sorted = []
-    for user in users:
-        users_sorted.append((user, users[user][0], users[user][1]))
+    users_sorted = [(user, counts[0], counts[1]) for user, counts in users.items()]
 
     # Sort by revup prs and total prs. The arg sort_by_revup determines
     # the order in which the sorts happen.
@@ -94,12 +89,8 @@ if __name__ == "__main__":
     users_sorted.sort(key=lambda tup: tup[1 + args.sort_by_revup], reverse=True)
 
     for i in range(args.num_users):
+        name, num_prs, num_revup_prs = users_sorted[i]
         print(
-            "{}: {} with {} PRs and {} revup PRs ({:}%)".format(
-                i + 1,
-                users_sorted[i][0],
-                users_sorted[i][1],
-                users_sorted[i][2],
-                int(100.0 * users_sorted[i][2] / users_sorted[i][1]),
-            )
+            f"{i + 1}: {name} with {num_prs} PRs and {num_revup_prs} revup PRs"
+            f" ({int(100.0 * num_revup_prs / num_prs)}%)"
         )

@@ -232,7 +232,7 @@ class GithubQuery(GraphqlQuery):
                     requested = revs["requestedReviewer"]
                     if not requested:
                         continue
-                    elif "slug" in requested:
+                    if "slug" in requested:
                         reviewer_teams.add(
                             f"{requested['organization']['login']}/{requested['slug']}"
                         )
@@ -248,9 +248,7 @@ class GithubQuery(GraphqlQuery):
                     assignees.add(user["login"])
                     assignee_ids.add(user["id"])
 
-                comments = []
-                for c in this_node["comments"]["nodes"]:
-                    comments.append(PrComment(c["body"], c["id"]))
+                comments = [PrComment(c["body"], c["id"]) for c in this_node["comments"]["nodes"]]
 
                 removed_reviewers: set[str] = set()
                 removed_reviewer_ids: set[str] = set()
@@ -306,13 +304,11 @@ class GithubQuery(GraphqlQuery):
         for i, user_id in enumerate(user_ids):
             this_node = raw[i]
             if len(this_node["nodes"]) == 0:
-                logging.warning("No matching user found for {}".format(user_id))
+                logging.warning(f"No matching user found for {user_id}")
             else:
                 if this_node["totalCount"] > len(this_node["nodes"]):
                     logging.warning(
-                        "Too many matching users found for {}, try being more specific".format(
-                            user_id
-                        )
+                        f"Too many matching users found for {user_id}, try being more specific"
                     )
                 shortest_name = this_node["nodes"][0]["login"]
                 names_to_ids[user_id] = this_node["nodes"][0]["id"]
@@ -327,9 +323,8 @@ class GithubQuery(GraphqlQuery):
                         found_match = True
                 if not found_match:
                     logging.warning(
-                        "Couldn't find a prefixed match for {}, going with {} instead".format(
-                            user_id, shortest_name
-                        )
+                        f"Couldn't find a prefixed match for {user_id}, going with"
+                        f" {shortest_name} instead"
                     )
         return names_to_ids, names_to_logins
 
@@ -341,7 +336,7 @@ class GithubQuery(GraphqlQuery):
             if this_node is not None:
                 labels_to_ids[label] = this_node["id"]
             else:
-                logging.warning("Couldn't find an existing label named {}".format(label))
+                logging.warning(f"Couldn't find an existing label named {label}")
         return labels_to_ids
 
     def parse_comment_bodies(
@@ -371,7 +366,7 @@ class GithubQuery(GraphqlQuery):
                 else:
                     teams_to_members[team_ref] = member_logins
             else:
-                logging.warning("Couldn't find a team matching {}/{}".format(org, slug))
+                logging.warning(f"Couldn't find a team matching {org}/{slug}")
         return teams_to_ids, teams_to_members
 
 
@@ -431,9 +426,7 @@ class Github(Forge):
             if attempts <= 1 or not is_transient_status(e.status):
                 raise
             logging.warning(
-                "GitHub returned {}, checking which comments it added before retrying".format(
-                    e.status
-                )
+                f"GitHub returned {e.status}, checking which comments it added before retrying"
             )
 
         remaining = q.without(await self._comments_already_added(q))
@@ -528,9 +521,8 @@ class Github(Forge):
                 # No progress and too big: halve to shrink the request.
                 left, right = retry.split()
                 logging.warning(
-                    "Request too large, splitting {} fields into {} + {}".format(
-                        retry.total_items(), left.total_items(), right.total_items()
-                    )
+                    f"Request too large, splitting {retry.total_items()} fields into"
+                    f" {left.total_items()} + {right.total_items()}"
                 )
                 pending.extend([(left, 0), (right, 0)])
             elif made_progress:
@@ -549,7 +541,7 @@ class Github(Forge):
                     fatal.append(
                         stalled.raw
                         if stalled is not None
-                        else {"message": "Request repeatedly failed to complete: {}".format(alias)}
+                        else {"message": f"Request repeatedly failed to complete: {alias}"}
                     )
 
         if fatal:

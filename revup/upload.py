@@ -6,7 +6,7 @@ import logging
 import os
 import shlex
 import subprocess
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
 from rich import get_console
 
@@ -34,7 +34,7 @@ def run_pre_upload(pre_upload: str, ref_args: list[str], repo_root: str) -> None
     if os.path.isfile(in_repo_root):
         command[0] = in_repo_root
 
-    logging.debug("Running pre-upload command: {}".format(" ".join(command)))
+    logging.debug(f"Running pre-upload command: {' '.join(command)}")
     try:
         result = subprocess.run(
             command,
@@ -47,7 +47,7 @@ def run_pre_upload(pre_upload: str, ref_args: list[str], repo_root: str) -> None
     except OSError as exc:
         raise RevupShellException(f"Couldn't run pre-upload command: {exc}") from exc
     if result.stdout:
-        logging.debug("Pre-upload output:\n{}".format(result.stdout.rstrip()))
+        logging.debug(f"Pre-upload output:\n{result.stdout.rstrip()}")
     if result.returncode != 0:
         raise RevupShellException(
             f"Pre-upload command failed:\n{result.stdout}\n"
@@ -97,7 +97,7 @@ async def run(
             limit_topics=args.topics,
         )
         await topics.populate_relative_reviews(
-            args.uploader if args.uploader else git_ctx.author,
+            args.uploader or git_ctx.author,
             branch_format=args.branch_format,
             deep_stack_draft=args.deep_stack_draft,
         )

@@ -309,7 +309,7 @@ class TestAmendAll:
             assert not await env.has_staged_changes()
             assert await env.has_unstaged_changes()
 
-            args = make_amend_args(edit=False, **{"all": True})
+            args = make_amend_args(edit=False, all=True)
             ret = await amend.main(args, env.git_ctx)
 
             assert ret == 0
@@ -324,7 +324,7 @@ class TestAmendAll:
             await env.write_file("untracked.txt", "untracked")
             assert not await env.has_staged_changes()
 
-            args = make_amend_args(edit=False, **{"all": True})
+            args = make_amend_args(edit=False, all=True)
             ret = await amend.main(args, env.git_ctx)
 
             # No tracked file was modified, so nothing to amend
@@ -338,7 +338,7 @@ class TestAmendAll:
             await env.commit("second", {"b.txt": "b"})
 
             await env.write_file("a.txt", "a_modified")
-            args = make_amend_args(ref_or_topic="HEAD~1", edit=False, **{"all": True})
+            args = make_amend_args(ref_or_topic="HEAD~1", edit=False, all=True)
             ret = await amend.main(args, env.git_ctx)
 
             assert ret == 0
@@ -422,7 +422,7 @@ class TestAmendRefParsing:
                 parse_refs=False,
                 parse_topics=False,
             )
-            with pytest.raises(RevupUsageException, match="--no-parse-refs.*--no-parse-topics"):
+            with pytest.raises(RevupUsageException, match=r"--no-parse-refs.*--no-parse-topics"):
                 await amend.main(args, env.git_ctx)
 
     @async_test
@@ -985,7 +985,7 @@ class TestAmendLastTouched:
 
             # Modify without staging
             await env.write_file("a.txt", "a2")
-            args = make_amend_args(last_touched=True, parse_topics=True, **{"all": True})
+            args = make_amend_args(last_touched=True, parse_topics=True, all=True)
             await amend.main(args, env.git_ctx)
 
             assert await env.get_file_at_commit("a.txt", "HEAD") == "a2"

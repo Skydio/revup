@@ -12,14 +12,14 @@ from revup import revup
 
 def mock_revup(args, user_input) -> str:
     # The first arg is always the program path.
-    args = ["revup"] + args
+    args = ["revup", *args]
 
     # We want to ensure that no connection to the forge is established
     mock.patch("revup.revup.forge_connection")
     # User input mocks the user typing things into the terminal.
     user_input = list(user_input) if isinstance(user_input, list) else [user_input]
     with mock.patch.object(sys, "argv", args):
-        with mock.patch.object(builtins, "input", lambda x: user_input.pop(0)):
+        with mock.patch.object(builtins, "input", side_effect=lambda x: user_input.pop(0)):
             with mock.patch("sys.stdout", new_callable=io.StringIO):
                 revup_parser, all_parsers = revup.build_parser()
                 asyncio.run(revup.main(revup_parser, all_parsers))

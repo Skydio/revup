@@ -23,12 +23,10 @@ def fixed_readme() -> str:
     revup_version_hash = os.environ.get("REVUP_VERSION_HASH", "main")
 
     # Replace relative links with absolute, so images appear correctly on PyPI
-    readme = readme.replace(
+    return readme.replace(
         "docs/images/",
         f"https://raw.githubusercontent.com/skydio/revup/{revup_version_hash}/docs/images/",
     )
-
-    return readme
 
 
 setup(

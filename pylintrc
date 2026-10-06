@@ -108,11 +108,12 @@ disable=raw-checker-failed,
         unnecessary-lambda-assignment,
 
         # Would be nice to drive these to 0
-        consider-using-f-string,
         missing-class-docstring,
         missing-function-docstring,
         missing-module-docstring,
         too-many-arguments,
+        # too-many-positional-arguments, by code since pylint 3.2 and 3.3 name it differently
+        R0917,
         too-many-branches,
         too-many-boolean-expressions,
         too-many-instance-attributes,

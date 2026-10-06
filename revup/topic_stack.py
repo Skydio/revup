@@ -5,11 +5,11 @@ import logging
 import re
 import subprocess
 from collections import defaultdict
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Iterator
 
 from rich import get_console
 from rich.markup import escape
@@ -123,7 +123,7 @@ def match_commit_tag(line: str) -> tuple[str, set[str]] | None:
             tag = tag[:-1]
     if tag not in VALID_TAGS:
         return None
-    val = set(s.strip() for s in m.group("tagvalue").split(","))
+    val = {s.strip() for s in m.group("tagvalue").split(",")}
     val.discard("")  # Discards any whitespace only values, since it was stripped prior
     return tag, val
 
@@ -168,7 +168,7 @@ def translate_if_exists(names: set[str], translation: dict[str, str]) -> set[str
     """
     Return the translation entry for each name, only if it exists.
     """
-    return set(translation[name] for name in names if name in translation)
+    return {translation[name] for name in names if name in translation}
 
 
 class PrBodySource(Enum):
@@ -394,7 +394,7 @@ class TopicStack:
             if matched is not None:
                 tag, val = matched
                 if tag in (TAG_BRANCH, TAG_RELATIVE_BRANCH):
-                    val = set(self.git_ctx.ensure_branch_prefix(b) for b in val)
+                    val = {self.git_ctx.ensure_branch_prefix(b) for b in val}
                 ret[tag].update(val)
             else:
                 trimmed_msg.append(ln)
@@ -615,14 +615,13 @@ class TopicStack:
             for bool_tag in (TAG_UPDATE_PR_BODY, TAG_DRAFT):
                 get_bool_tag(topic.tags, bool_tag)
 
-            if TAG_BRANCH_FORMAT in topic.tags:
-                if (
-                    len(topic.tags[TAG_BRANCH_FORMAT]) > 1
-                    or min(topic.tags[TAG_BRANCH_FORMAT]).lower() not in BRANCH_FORMAT_STRATEGIES
-                ):
-                    raise RevupUsageException(
-                        f"Invalid tags for branch-format: {topic.tags[TAG_BRANCH_FORMAT]}"
-                    )
+            if TAG_BRANCH_FORMAT in topic.tags and (
+                len(topic.tags[TAG_BRANCH_FORMAT]) > 1
+                or min(topic.tags[TAG_BRANCH_FORMAT]).lower() not in BRANCH_FORMAT_STRATEGIES
+            ):
+                raise RevupUsageException(
+                    f"Invalid tags for branch-format: {topic.tags[TAG_BRANCH_FORMAT]}"
+                )
 
             relative_topic = ""
             if force_relative_chain and last_topic is not None:
@@ -731,20 +730,19 @@ class TopicStack:
                         f"differing relative branches, {topic.tags[TAG_RELATIVE_BRANCH]} vs "
                         f"{topic.relative_topic.tags[TAG_RELATIVE_BRANCH]}"
                     )
-            else:
-                # No relative topic specified. Base ref is just the branch(es)
-                if len(topic.tags[TAG_BRANCH]) == 0:
-                    topic.tags[TAG_BRANCH].add(self.base_branch)
-                    if len(topic.tags[TAG_RELATIVE_BRANCH]) == 0:
-                        # Only add the default relative branch if the review is using the default
-                        # branch. If the user manually specified the default branch, it indicates
-                        # they don't want the default relative branch.
-                        topic.tags[TAG_RELATIVE_BRANCH].add(self.relative_branch)
-                    else:
-                        # User has specified a relative branch without a base branch. We'll allow
-                        # this for now but if it generally results in confusion since the base
-                        # branch will be set to the default and not autodetected, we'll raise.
-                        pass
+            # No relative topic specified. Base ref is just the branch(es)
+            elif len(topic.tags[TAG_BRANCH]) == 0:
+                topic.tags[TAG_BRANCH].add(self.base_branch)
+                if len(topic.tags[TAG_RELATIVE_BRANCH]) == 0:
+                    # Only add the default relative branch if the review is using the default
+                    # branch. If the user manually specified the default branch, it indicates
+                    # they don't want the default relative branch.
+                    topic.tags[TAG_RELATIVE_BRANCH].add(self.relative_branch)
+                else:
+                    # User has specified a relative branch without a base branch. We'll allow
+                    # this for now but if it generally results in confusion since the base
+                    # branch will be set to the default and not autodetected, we'll raise.
+                    pass
 
             # Each topic can have at most 1 relative branch.
             # If there is a relative branch, only one base branch can be specified, and all
@@ -754,7 +752,7 @@ class TopicStack:
                     "Can't specify more than 1 relative branch per topic! Got"
                     f" {topic.tags[TAG_RELATIVE_BRANCH]} for topic {name}"
                 )
-            elif topic.tags[TAG_RELATIVE_BRANCH] and len(topic.tags[TAG_BRANCH]) > 1:
+            if topic.tags[TAG_RELATIVE_BRANCH] and len(topic.tags[TAG_BRANCH]) > 1:
                 raise RevupUsageException(
                     "Can't specify more than one base branch when there is a relative branch! Got"
                     f" {topic.tags[TAG_BRANCH]} for topic {name}"
@@ -914,9 +912,8 @@ class TopicStack:
                     )
                 )
                 logging.debug(
-                    "Review {}/{} is rebase {} pure {}".format(
-                        base_branch, topic.name, is_rebase, review.is_pure_rebase
-                    )
+                    f"Review {base_branch}/{topic.name} is rebase {is_rebase} pure"
+                    f" {review.is_pure_rebase}"
                 )
 
                 if is_rebase and not review.is_pure_rebase:
@@ -975,13 +972,9 @@ class TopicStack:
                     or topic.relative_topic.reviews[base_branch].push_status != PushStatus.PUSHED
                 )
                 logging.debug(
-                    "Review {}/{} is correct base {} relative nochange {} skippable {}".format(
-                        base_branch,
-                        topic.name,
-                        is_on_correct_base,
-                        relative_topic_is_nochange,
-                        relative_topic_is_skippable,
-                    )
+                    f"Review {base_branch}/{topic.name} is correct base {is_on_correct_base}"
+                    f" relative nochange {relative_topic_is_nochange} skippable"
+                    f" {relative_topic_is_skippable}"
                 )
 
                 if review.base_ref == review.remote_commits[0].parents[0] or (
@@ -1004,11 +997,10 @@ class TopicStack:
                     # other case, since they'll be made if status is PUSHED, and they'll either
                     # be skipped or marked as push if status is REBASE.
                     review.new_commits = [c.commit_id for c in review.remote_commits]
-            else:
-                if review.status == PrStatus.MERGED:
-                    # This PR was "merged" but isn't a rebase, meaning there is actually new
-                    # content that should be in a new PR.
-                    review.status = PrStatus.NEW
+            elif review.status == PrStatus.MERGED:
+                # This PR was "merged" but isn't a rebase, meaning there is actually new
+                # content that should be in a new PR.
+                review.status = PrStatus.NEW
 
             if review.push_status == PushStatus.PUSHED:
                 # If this change must be pushed, then all changes it depends on cannot be
@@ -1292,7 +1284,7 @@ class TopicStack:
 
         relative_targets = set()
         # Add queries for relative branches at the end
-        for _, topic, _, review in self.all_reviews_iter():
+        for _, _topic, _, review in self.all_reviews_iter():
             if review.relative_branch:
                 relative_targets.add(self.git_ctx.remove_branch_prefix(review.relative_branch))
         pr_targets.extend(relative_targets)
@@ -1429,7 +1421,7 @@ class TopicStack:
                 label_ids = translate_if_exists(labels, self.labels_to_ids).difference(
                     review.pr_info.label_ids
                 )
-                valid_labels = set(label for label in labels if label in self.labels_to_ids)
+                valid_labels = {label for label in labels if label in self.labels_to_ids}
 
                 # Don't request reviewers that are already added, otherwise the request will clear
                 # the "reviewed" status in the UI.

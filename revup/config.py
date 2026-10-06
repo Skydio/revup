@@ -23,10 +23,11 @@ class RevupArgParser(argparse.ArgumentParser):
         action.completable = completable  # type: ignore[attr-defined]
 
         if isinstance(action, _StoreTrueAction):
-            no_options = []
-            for option_string in action.option_strings:
-                if option_string.startswith("--"):
-                    no_options.append("--no-" + option_string[2:])
+            no_options = [
+                "--no-" + option_string[2:]
+                for option_string in action.option_strings
+                if option_string.startswith("--")
+            ]
 
             if no_options:
                 neg_action = _StoreFalseAction(
@@ -49,12 +50,12 @@ class RevupArgParser(argparse.ArgumentParser):
         return action
 
     def collect_excluded_completions(self) -> list[str]:
-        excluded = []
+        excluded: list[str] = []
         for action in self._actions:
             completable = getattr(action, "completable", False)
-            for opt in action.option_strings:
-                if not completable or not opt.startswith("--"):
-                    excluded.append(opt)
+            excluded.extend(
+                opt for opt in action.option_strings if not completable or not opt.startswith("--")
+            )
             if hasattr(action, "choices") and isinstance(action.choices, dict):
                 for sp in action.choices.values():
                     if isinstance(sp, RevupArgParser):
@@ -215,11 +216,8 @@ def config_main(conf: Config, args: argparse.Namespace, all_parsers: list[RevupA
     parser = all_commands[command]
     actions = parser.get_actions()
 
-    if not args.delete:
-        if key not in actions:
-            raise RevupUsageException(
-                f"Invalid option key {key}, choose from {list(actions.keys())}"
-            )
+    if not args.delete and key not in actions:
+        raise RevupUsageException(f"Invalid option key {key}, choose from {list(actions.keys())}")
 
     if args.delete:
         value = None
@@ -253,9 +251,12 @@ def config_main(conf: Config, args: argparse.Namespace, all_parsers: list[RevupA
         # (this may throw if the value is not allowed)
         parser.set_option_default(key, actions[key], value)
 
-        if command == "revup" and key in ("forge_oauth", "github_oauth"):
-            if not re.match(r"^[a-z\d_]+$", value, re.I):
-                raise ValueError("Input string is not a valid oauth")
+        if (
+            command == "revup"
+            and key in ("forge_oauth", "github_oauth")
+            and not re.match(r"^[a-z\d_]+$", value, re.IGNORECASE)
+        ):
+            raise ValueError("Input string is not a valid oauth")
 
     this_config.set_value(command, key, value)
     this_config.write()

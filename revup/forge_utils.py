@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import argparse
 import logging
 import os
 import re
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from revup import config, git, logs
 from revup.core_types import RevupUsageException
@@ -127,9 +129,8 @@ async def forge_connection(
         finally:
             if endpoint.last_ratelimit_remaining is not None:
                 logging.debug(
-                    "GitHub rate limit: {} points remaining, resets at {}".format(
-                        endpoint.last_ratelimit_remaining, endpoint.last_ratelimit_reset
-                    )
+                    f"GitHub rate limit: {endpoint.last_ratelimit_remaining} points remaining,"
+                    f" resets at {endpoint.last_ratelimit_reset}"
                 )
             await forge.close()
     else:

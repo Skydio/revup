@@ -80,10 +80,10 @@ async def run_upload_pipeline(env, **kwargs):
         user_aliases=args.user_aliases,
         auto_add_users=args.auto_add_users,
         self_authored_only=args.self_authored_only,
-        limit_topics=args.topics if args.topics else None,
+        limit_topics=args.topics or None,
     )
     await topics.populate_relative_reviews(
-        args.uploader if args.uploader else env.git_ctx.author,
+        args.uploader or env.git_ctx.author,
         branch_format=args.branch_format,
         deep_stack_draft=args.deep_stack_draft,
     )
@@ -172,7 +172,7 @@ class TestUploadMultipleTopics:
             assert beta_content == "beta-content"
 
             # beta's cherry-pick should NOT contain alpha's file (since they're independent)
-            with pytest.raises(Exception):
+            with pytest.raises(RuntimeError, match="failed with exit code"):
                 await get_file_at_ref(env, beta_review.new_commits[-1], "a.txt")
 
 
@@ -331,7 +331,7 @@ class TestUploadAutoTopic:
             await env.commit("one two three four five six seven", {"a.txt": "a"})
 
             topics = await run_upload_pipeline(env, auto_topic=True)
-            name = list(topics.topics.keys())[0]
+            name = next(iter(topics.topics.keys()))
             assert name == "one_two_three_four_five"
 
     @async_test
@@ -341,7 +341,7 @@ class TestUploadAutoTopic:
             await env.commit("[feat]: add thing", {"a.txt": "a"})
 
             topics = await run_upload_pipeline(env, auto_topic=True)
-            name = list(topics.topics.keys())[0]
+            name = next(iter(topics.topics.keys()))
             assert "[" not in name
             assert "]" not in name
             assert ":" not in name
@@ -967,7 +967,7 @@ class TestPrBodySource:
 
             topics = await run_upload_pipeline(env)
             topic = topics.topics["alpha"]
-            body, title = topics._get_pr_body_and_title(topic, PrBodySource.SQUASHED)
+            body, _title = topics._get_pr_body_and_title(topic, PrBodySource.SQUASHED)
 
             assert "body one" in body
             assert "body two" in body
@@ -982,7 +982,7 @@ class TestPrBodySource:
 
             topics = await run_upload_pipeline(env)
             topic = topics.topics["alpha"]
-            body, title = topics._get_pr_body_and_title(topic, PrBodySource.SQUASHED)
+            body, _title = topics._get_pr_body_and_title(topic, PrBodySource.SQUASHED)
 
             assert "alice" not in body
             assert "Topic" not in body
@@ -1013,7 +1013,7 @@ class TestPrBodySource:
 
             topics = await run_upload_pipeline(env)
             topic = topics.topics["alpha"]
-            body, title = topics._get_pr_body_and_title(topic, PrBodySource.TEMPLATE)
+            body, _title = topics._get_pr_body_and_title(topic, PrBodySource.TEMPLATE)
 
             assert body == ""
 
@@ -1766,7 +1766,7 @@ class TestForgeReviewers:
             await full_upload_pipeline(env, forge)
 
             # Simulate bob being removed on the forge
-            pr = list(forge.prs.values())[0]
+            pr = next(iter(forge.prs.values()))
             pr.reviewers = set()
             pr.reviewer_ids = set()
             pr.removed_reviewers = {"bob-full"}
@@ -1792,7 +1792,7 @@ class TestForgeReviewers:
 
             await full_upload_pipeline(env, forge)
 
-            pr = list(forge.prs.values())[0]
+            pr = next(iter(forge.prs.values()))
             pr.reviewers = set()
             pr.reviewer_ids = set()
             pr.removed_reviewers = {"bob-full"}
@@ -1831,7 +1831,7 @@ class TestForgeReviewers:
             await full_upload_pipeline(env, forge)
 
             # Simulate: team resolved, alice is now a reviewer
-            pr = list(forge.prs.values())[0]
+            pr = next(iter(forge.prs.values()))
             pr.reviewers = {"alice"}
             pr.reviewer_ids = {"id_alice"}
             pr.reviewer_teams = set()
@@ -1901,7 +1901,7 @@ class TestForgeLabels:
             await full_upload_pipeline(env, forge)
 
             # Simulate the user marking the pr ready for review in github
-            pr = list(forge.prs.values())[0]
+            pr = next(iter(forge.prs.values()))
             pr.is_draft = False
 
             topics = await full_upload_pipeline(env, forge)
@@ -1919,7 +1919,7 @@ class TestForgeLabels:
             await full_upload_pipeline(env, forge, draft_on_create_only=True)
             assert forge.created_prs[0].is_draft is True
 
-            pr = list(forge.prs.values())[0]
+            pr = next(iter(forge.prs.values()))
             pr.is_draft = False
 
             topics = await full_upload_pipeline(env, forge, draft_on_create_only=True)
@@ -1938,7 +1938,7 @@ class TestForgeLabels:
             await env.commit("feat\n\nTopic: alpha\nDraft: true", {"a.txt": "a"})
 
             await full_upload_pipeline(env, forge, draft_on_create_only=True)
-            pr = list(forge.prs.values())[0]
+            pr = next(iter(forge.prs.values()))
             pr.is_draft = False
 
             topics = await full_upload_pipeline(env, forge, draft_on_create_only=True, status=True)
@@ -1955,7 +1955,7 @@ class TestForgeLabels:
             await env.commit("second\n\nTopic: second\nRelative: first", {"b.txt": "b"})
 
             await full_upload_pipeline(env, forge, deep_stack_draft=2, draft_on_create_only=True)
-            pr = [p for p in forge.created_prs if p.headRef.endswith("second")][0]
+            pr = next(p for p in forge.created_prs if p.headRef.endswith("second"))
             assert pr.is_draft is True
 
             # Make second no longer relative, which drops it to depth 1
@@ -2041,7 +2041,7 @@ class TestForgeMergedPr:
 
             await full_upload_pipeline(env, forge, review_graph=False)
 
-            pr = list(forge.prs.values())[0]
+            pr = next(iter(forge.prs.values()))
             pr.state = "MERGED"
             forge.created_prs.clear()
 
@@ -2060,7 +2060,7 @@ class TestForgeMergedPr:
 
             await full_upload_pipeline(env, forge, review_graph=False)
 
-            pr = list(forge.prs.values())[0]
+            pr = next(iter(forge.prs.values()))
             pr.state = "MERGED"
             forge.created_prs.clear()
 

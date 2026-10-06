@@ -110,7 +110,7 @@ class TestFileLoggingEnabled:
 
     def test_command_line_is_recorded(self, log_dir):
         logs.configure_logger(debug=False, redactions={}, log_to_file=True)
-        assert "revup {}".format(REVUP_VERSION) in read_log_file()
+        assert f"revup {REVUP_VERSION}" in read_log_file()
 
     def test_redactions_apply_to_file(self, log_dir):
         logs.configure_logger(debug=False, redactions={"secret_token": "<OAUTH>"}, log_to_file=True)
@@ -170,7 +170,7 @@ class TestPruning:
         """Create `count` log files whose names sort oldest to newest."""
         log_dir.mkdir(parents=True, exist_ok=True)
         for i in range(1, count + 1):
-            (log_dir / "202601{:02d}T000000-1.log".format(i)).write_text("old")
+            (log_dir / f"202601{i:02d}T000000-1.log").write_text("old")
 
     def test_prunes_to_keep_count(self, log_dir):
         self.make_logs(log_dir, 5)

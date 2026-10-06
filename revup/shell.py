@@ -7,8 +7,10 @@ import shlex
 import subprocess
 import sys
 import time
-from typing import IO, Any, Callable, Coroutine, Sequence, TypeVar, Union
+from collections.abc import Callable, Coroutine, Sequence
+from typing import IO, Any, TypeVar, Union
 
+# Evaluated at runtime instead of being a lazy annotation, so `X | Y` isn't usable until py3.10.
 _HANDLE = Union[None, int, IO[Any]]
 
 
@@ -28,7 +30,7 @@ def log_command(args: Sequence[str]) -> None:
         *args: the list of command line arguments you want to run
         env: the dictionary of environment variable settings for the command
     """
-    logging.debug("$ {}".format(" ".join(shlex.quote(arg) for arg in args)))
+    logging.debug(f"$ {' '.join(shlex.quote(arg) for arg in args)}")
 
 
 K = TypeVar("K")
@@ -128,7 +130,7 @@ class Shell:
                 and their output, which is governed by the log level.
         """
         self.quiet = quiet
-        self.cwd = cwd if cwd else os.getcwd()
+        self.cwd = cwd or os.getcwd()
 
     async def create_sh_task(
         self,
@@ -221,7 +223,7 @@ class Shell:
 
         ret = self.handle_sh_results(ret, out, err, stdout, raiseonerror, quiet, *args)
         if debug_enabled():
-            logging.debug("Took {}s".format(time.time() - start_time))
+            logging.debug(f"Took {time.time() - start_time}s")
         return ret
 
     async def piped_sh(
@@ -240,7 +242,7 @@ class Shell:
     ) -> tuple[int, str]:
         start_time = time.time()
         read, write = os.pipe()
-        log_args = args1 + ["|"] + args2
+        log_args = [*args1, "|", *args2]
         if debug_enabled():
             log_command(log_args)
 
@@ -265,7 +267,7 @@ class Shell:
         )
         os.close(read)
         if debug_enabled():
-            logging.debug("Took {}s".format(time.time() - start_time))
+            logging.debug(f"Took {time.time() - start_time}s")
         return ret
 
     def handle_sh_results(
@@ -281,7 +283,7 @@ class Shell:
         if returncode and err:
             logging.warning(err.decode(errors="backslashreplace"))
         elif not quiet and debug_enabled() and err:
-            logging.debug("# stderr:\n{}".format(err.decode(errors="backslashreplace")))
+            logging.debug(f"# stderr:\n{err.decode(errors='backslashreplace')}")
         if not quiet and debug_enabled() and out:
             logging.debug(
                 "{}{}".format(
@@ -291,15 +293,14 @@ class Shell:
             )
 
         if returncode != 0 and raiseonerror:
-            raise RuntimeError("{} failed with exit code {}".format(" ".join(args), returncode))
+            raise RuntimeError(f"{' '.join(args)} failed with exit code {returncode}")
 
         if stdout == subprocess.PIPE:
             # Decode leniently: git output is usually UTF-8 but can contain
             # arbitrary bytes. A strict decode would crash; replace keeps output
             # displayable.
             return (returncode, out.decode(errors="replace"))
-        else:
-            return (returncode, "")
+        return (returncode, "")
 
     def open(self, fn: str, mode: str) -> IO[Any]:
         """

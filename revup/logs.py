@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import re
@@ -108,17 +109,15 @@ def prune_old_logs(log_dir: str, keep: int) -> None:
         return
 
     for name in names[: max(len(names) - keep, 0)]:
-        try:
+        # Another revup may have pruned it already, or we may not own it.
+        with contextlib.suppress(OSError):
             os.remove(os.path.join(log_dir, name))
-        except OSError:
-            # Another revup may have pruned it already, or we may not own it.
-            pass
 
 
 def make_console_handler(log_filter: logging.Filter) -> RichHandler:
     handler = RevupRichHandler(keywords=[])
     handler.addFilter(log_filter)
-    handler.highlighter = None  # type: ignore
+    handler.highlighter = None  # type: ignore[assignment]
     return handler
 
 
@@ -138,9 +137,7 @@ def make_file_handler(log_filter: logging.Filter) -> logging.FileHandler | None:
         os.makedirs(log_dir, exist_ok=True)
         # Keep 19 old logs plus the one we're about to add, for 20 runs of history.
         prune_old_logs(log_dir, 19)
-        path = os.path.join(
-            log_dir, "{}-{}.log".format(time.strftime("%Y%m%dT%H%M%S"), os.getpid())
-        )
+        path = os.path.join(log_dir, f"{time.strftime('%Y%m%dT%H%M%S')}-{os.getpid()}.log")
         handler = logging.FileHandler(path, encoding="utf-8")
     except OSError as e:
         logging.warning(f"Couldn't write verbose logs to {log_dir}: {e}")
@@ -183,7 +180,7 @@ def configure_logger(debug: bool, redactions: dict[str, str], log_to_file: bool 
         if file_handler is not None:
             root_logger.addHandler(file_handler)
             # Record what was run, since the file outlives the terminal it came from.
-            logging.debug("revup {} : {}".format(REVUP_VERSION, " ".join(sys.argv[1:])))
+            logging.debug(f"revup {REVUP_VERSION} : {' '.join(sys.argv[1:])}")
 
 
 def redact(redactions: dict[str, str]) -> None:

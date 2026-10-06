@@ -105,11 +105,11 @@ class GitHubEndpoint:
 
         headers = {}
         if self.oauth_token:
-            headers["Authorization"] = "bearer {}".format(self.oauth_token)
+            headers["Authorization"] = f"bearer {self.oauth_token}"
 
-        logging.debug("# POST {}".format(self.graphql_endpoint))
-        logging.debug("Request GraphQL query:\n{}".format(query))
-        logging.debug("Request GraphQL variables:\n{}".format(json.dumps(kwargs, indent=1)))
+        logging.debug(f"# POST {self.graphql_endpoint}")
+        logging.debug(f"Request GraphQL query:\n{query}")
+        logging.debug(f"Request GraphQL variables:\n{json.dumps(kwargs, indent=1)}")
 
         start_time = time.time()
         async with self.session.post(
@@ -118,9 +118,7 @@ class GitHubEndpoint:
             headers=headers,
             proxy=self.proxy,
         ) as resp:
-            logging.debug(
-                "Response status: {} took {}".format(resp.status, time.time() - start_time)
-            )
+            logging.debug(f"Response status: {resp.status} took {time.time() - start_time}")
             reset = resp.headers.get("x-ratelimit-reset")
             reset_str = (
                 datetime.datetime.fromtimestamp(int(reset)).isoformat()
@@ -130,15 +128,13 @@ class GitHubEndpoint:
             self.last_ratelimit_remaining = resp.headers.get("x-ratelimit-remaining")
             self.last_ratelimit_reset = reset_str
             logging.debug(
-                "Ratelimit: {} remaining, resets at {}".format(
-                    self.last_ratelimit_remaining, reset_str
-                )
+                f"Ratelimit: {self.last_ratelimit_remaining} remaining, resets at {reset_str}"
             )
             try:
                 body = await resp.json()
-                logging.debug("Response JSON:\n{}".format(json.dumps(body, indent=1)))
+                logging.debug(f"Response JSON:\n{json.dumps(body, indent=1)}")
             except (ValueError, ContentTypeError):
-                logging.warning("Response body:\n{}".format(await resp.text()))
+                logging.warning(f"Response body:\n{await resp.text()}")
                 body = None
             return resp.status, resp.headers, body
 
@@ -174,9 +170,8 @@ class GitHubEndpoint:
 
             delay = min(_backoff_delay(headers, attempt, base_delay), MAX_BACKOFF_SECONDS)
             logging.warning(
-                "GitHub returned {}, retrying in {}s (attempt {}/{})".format(
-                    status, delay, attempt + 1, max_retries
-                )
+                f"GitHub returned {status}, retrying in {delay}s"
+                f" (attempt {attempt + 1}/{max_retries})"
             )
             await asyncio.sleep(delay)
 

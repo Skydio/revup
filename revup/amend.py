@@ -67,24 +67,24 @@ async def invoke_editor_for_commit_msg(
     elif cleanup_type == "strip":
         comments = f"\n{CLEANUP_STRIP_COMMENT.format(comment_char)}\n{comments}"
 
-    comments = "\n{} ".format(comment_char).join(comments.splitlines())
+    comments = f"\n{comment_char} ".join(comments.splitlines())
 
     with open(git_ctx.get_scratch_dir() + "/COMMIT_EDITMSG", mode="w") as temp_file:
         temp_file.write(f"{commit_msg}\n{comments}")
 
     subprocess.check_call((*shlex.split(editor), temp_file.name))
-    with open(temp_file.name, "r") as editor_file:
+    with open(temp_file.name) as editor_file:
         msg = editor_file.read()
 
     if cleanup_type == "strip":
         # Strip out comment lines
-        msg = re.sub(r"^{}.*$\n?".format(comment_char), "", msg, flags=re.M)
+        msg = re.sub(rf"^{comment_char}.*$\n?", "", msg, flags=re.MULTILINE)
     elif cleanup_type == "scissors":
         msg = msg.split(f"{comment_char} {CLEANUP_SCISSOR_LINE}")[0]
 
     if cleanup_type != "verbatim":
         # Match behavior of git, which will trim all trailing whitespace
-        msg = re.sub(r"[ \t]+$", "", msg, flags=re.M)
+        msg = re.sub(r"[ \t]+$", "", msg, flags=re.MULTILINE)
         # collapse consecutive empty lines
         msg = re.sub(r"[\n]{3,}", "\n\n", msg)
         # and remove all leading and trailing whitespace and newlines
@@ -112,9 +112,8 @@ async def parse_ref_or_topic(
     """
     Parse and return the hash of the commit that is referred to by the given topic or commit-ish.
     """
-    if args.parse_refs:
-        if await git_ctx.is_branch_or_commit(ref_or_topic):
-            return ref_or_topic
+    if args.parse_refs and await git_ctx.is_branch_or_commit(ref_or_topic):
+        return ref_or_topic
 
     if args.parse_topics:
         match = RE_TOPIC_WITH_MODIFIERS.match(ref_or_topic)
@@ -131,14 +130,13 @@ async def parse_ref_or_topic(
 
     if args.parse_refs and args.parse_topics:
         raise RevupUsageException(f"{ref_or_topic} is not a valid topic, commit, or branch name!")
-    elif args.parse_refs:
+    if args.parse_refs:
         raise RevupUsageException(f"{ref_or_topic} is not a valid commit or branch name!")
-    elif args.parse_topics:
+    if args.parse_topics:
         raise RevupUsageException(f"{ref_or_topic} is not a valid topic!")
-    else:
-        # It might make more sense to check this above, but if we do mypy thinks we've forgotten a
-        # return.
-        raise RevupUsageException("Can't have both --no-parse-refs and --no-parse-topics!")
+    # It might make more sense to check this above, but if we do mypy thinks we've forgotten a
+    # return.
+    raise RevupUsageException("Can't have both --no-parse-refs and --no-parse-topics!")
 
 
 async def replay_cherry_pick(
@@ -311,7 +309,7 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
         if not stack:
             return 0
 
-        staged_files = set(f for f in staged_files_output.split("\0") if f)
+        staged_files = {f for f in staged_files_output.split("\0") if f}
         new_commit = await rebuild_stack_last_touched(git_ctx, stack, staged_files)
         if not new_commit:
             return 0
@@ -397,7 +395,7 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
             if i == 0 and args.drop:
                 # Drop the target commit
                 continue
-            elif i == 0 and len(stack) > 1:
+            if i == 0 and len(stack) > 1:
                 # Perform an amend for the first commit, unless there's only one
                 # in which case we can use the tree shortcut.
                 temp_commit = CommitHeader(stack[-1].tree, [git.HEAD_COMMIT])
@@ -414,25 +412,22 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
                         commit_obj.commit_id,
                         "You may need to `git rebase -i` to resolve these conflicts!",
                     ) from exc
+            elif i == len(stack) - 1 and not args.drop:
+                # For the final commit (if drop isn't used) we can assume that
+                # the state is the exact same as the original cache, so we
+                # don't actually have to apply a patch.
+                new_commit = await git_ctx.cherry_pick_from_tree(commit_obj, new_commit)
             else:
-                if i == len(stack) - 1 and not args.drop:
-                    # For the final commit (if drop isn't used) we can assume that
-                    # the state is the exact same as the original cache, so we
-                    # don't actually have to apply a patch.
-                    new_commit = await git_ctx.cherry_pick_from_tree(commit_obj, new_commit)
-                else:
-                    new_commit = await replay_cherry_pick(git_ctx, commit_obj, new_commit)
+                new_commit = await replay_cherry_pick(git_ctx, commit_obj, new_commit)
     else:
         # If there's no diff (only text changed), its much faster to use the same trees
         new_commit = stack[0].parents[0]
         for stack_entry in stack:
             new_commit = await git_ctx.cherry_pick_from_tree(stack_entry, new_commit)
 
-    reflog_action_str = 'revup amend {}{}: "{}"'.format(
-        "--drop " if args.drop else "--insert " if args.insert else "",
-        stack[0].commit_id[:8],
-        stack[0].commit_msg.splitlines()[0][:40],
-    )
+    mode = "--drop " if args.drop else "--insert " if args.insert else ""
+    title = stack[0].commit_msg.splitlines()[0][:40]
+    reflog_action_str = f'revup amend {mode}{stack[0].commit_id[:8]}: "{title}"'
     git_env = {
         "GIT_REFLOG_ACTION": reflog_action_str,
     }

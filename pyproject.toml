@@ -4,9 +4,35 @@ target-version = "py38"
 extend-exclude = ["build", ".eggs"]
 
 [tool.ruff.lint]
-# Keep ruff's default rules (E, F) and also run import sorting (I), modern annotation
-# syntax (UP006, UP007, UP045, UP037) and the future import it needs on py38 (FA102).
-extend-select = ["I", "UP006", "UP007", "UP037", "UP045", "FA102"]
+# In addition to ruff's defaults (E, F), every family that this repo keeps clean.
+extend-select = [
+    "E501",
+    "I",
+    "UP",
+    "FA",
+    "B",
+    "C4",
+    "SIM",
+    "RET",
+    "PIE",
+    "FURB",
+    "PT",
+    "PERF",
+    "PGH",
+    "RUF",
+    "PLE",
+    "PLW",
+    "PLC0207",
+    "PLR5501",
+]
+ignore = [
+    # Catching per iteration is the point when every iteration can fail independently.
+    "PERF203",
+    # Compound asserts are fine outside of pytest assertions.
+    "PT018",
+    # Combining these needs parenthesized context managers, which are py3.10 and up.
+    "SIM117",
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["revup"]
