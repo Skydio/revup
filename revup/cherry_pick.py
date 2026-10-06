@@ -89,12 +89,9 @@ async def main(args: argparse.Namespace, git_ctx: git.Git, conf: config.Config) 
             "--reverse",
         )
     )[1].split("\n")[0]
-    if parent:
-        # Most recent version of the base branch is the parent of the last reachable commit.
-        parent = parent + "~"
-    else:
-        # Base branch has not moved at all since it was forked, so no commits are reachable.
-        parent = base_branch
+    # Most recent version of the base branch is the parent of the last reachable commit. If no
+    # commits are reachable, the base branch has not moved at all since it was forked.
+    parent = parent + "~" if parent else base_branch
 
     # First commit on the cherry-pick branch. We use this for message and author info
     first_commit = (

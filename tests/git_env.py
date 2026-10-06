@@ -72,7 +72,7 @@ class GitTestEnvironment:
             await self.sh.sh(self._git_path, "rev-parse", "--path-format=absolute", "--git-dir")
         )[1].rstrip()
         self.git_ctx.email = TEST_AUTHOR_EMAIL
-        self.git_ctx.author = TEST_AUTHOR_EMAIL.split("@")[0]
+        self.git_ctx.author = TEST_AUTHOR_EMAIL.split("@", maxsplit=1)[0]
         self.git_ctx.editor = "true"
 
     async def __aenter__(self):

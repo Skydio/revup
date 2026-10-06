@@ -42,19 +42,16 @@ def make_pr_node(
     head_oid: str = "abc123",
     num_commits: int = 1,
     is_draft: bool = False,
-    reviewers: list[dict] = None,
-    team_reviewers: list[dict] = None,
-    latest_reviews: list[dict] = None,
-    assignees: list[dict] = None,
-    labels: list[dict] = None,
-    comments: list[dict] = None,
-    timeline_items: list[dict] = None,
+    reviewers: list[dict] | None = None,
+    team_reviewers: list[dict] | None = None,
+    latest_reviews: list[dict] | None = None,
+    assignees: list[dict] | None = None,
+    labels: list[dict] | None = None,
+    comments: list[dict] | None = None,
+    timeline_items: list[dict] | None = None,
 ) -> dict[str, Any]:
-    review_requests = []
-    for r in reviewers or []:
-        review_requests.append({"requestedReviewer": r})
-    for t in team_reviewers or []:
-        review_requests.append({"requestedReviewer": t})
+    review_requests = [{"requestedReviewer": r} for r in reviewers or []]
+    review_requests.extend({"requestedReviewer": t} for t in team_reviewers or [])
 
     return {
         "nodes": [
@@ -88,7 +85,7 @@ def make_label_node(name: str = "bug", node_id: str = "L_1") -> dict[str, Any]:
     return {"id": node_id, "name": name}
 
 
-def make_team_node(team_id: str = "T_1", members: list[str] = None) -> dict[str, Any]:
+def make_team_node(team_id: str = "T_1", members: list[str] | None = None) -> dict[str, Any]:
     if members is None:
         members = ["alice"]
     return {

@@ -8,7 +8,7 @@ import os
 import re
 import shutil
 import tempfile
-from typing import Any, Optional, Tuple, cast
+from typing import Any, cast
 
 from async_lru import alru_cache as lru_cache
 
@@ -122,7 +122,7 @@ async def make_git(args: argparse.Namespace) -> Git:
     sh = shell.Shell(not args.verbose)
     git_path = args.git_path
     git_version = args.git_version
-    remote_name = args.fork_name if args.fork_name else args.remote_name
+    remote_name = args.fork_name or args.remote_name
     main_branch = args.main_branch
     base_branch_globs = args.base_branch_globs
     keep_temp = args.keep_temp
@@ -172,7 +172,7 @@ async def make_git(args: argparse.Namespace) -> Git:
         main_exists,
         gpg_sign,
     ) = cast(
-        Tuple[str, str, str, str, Optional[str], bool, bool],
+        "tuple[str, str, str, str, str | None, bool, bool]",
         await asyncio.gather(
             git_ctx.git_stdout("rev-parse", "--show-toplevel"),
             git_ctx.git_stdout("rev-parse", "--path-format=absolute", "--git-dir"),
@@ -190,7 +190,7 @@ async def make_git(args: argparse.Namespace) -> Git:
         for v, a in zip(version_arr, actual_version_arr):
             if a > v:
                 break
-            elif a == v:
+            if a == v:
                 continue
             raise RuntimeError(
                 f"revup requires git {version_arr}, you're running {actual_version_arr}"
@@ -202,13 +202,12 @@ async def make_git(args: argparse.Namespace) -> Git:
     git_ctx.author = git_ctx.email.split("@")[0]
     git_ctx.editor = resolved_editor
     git_ctx.gpg_sign = gpg_sign
-    if not main_exists:
-        if main_branch in COMMON_MAIN_BRANCHES:
-            git_ctx.main_branch = COMMON_MAIN_BRANCHES[1 - COMMON_MAIN_BRANCHES.index(main_branch)]
-            logging.info(
-                'Branch {} not found, falling back to "{}". We recommend you set this in'
-                " .revupconfig".format(main_branch, git_ctx.main_branch)
-            )
+    if not main_exists and main_branch in COMMON_MAIN_BRANCHES:
+        git_ctx.main_branch = COMMON_MAIN_BRANCHES[1 - COMMON_MAIN_BRANCHES.index(main_branch)]
+        logging.info(
+            f'Branch {main_branch} not found, falling back to "{git_ctx.main_branch}".'
+            " We recommend you set this in .revupconfig"
+        )
     return git_ctx
 
 
@@ -314,10 +313,10 @@ class Git:
         def _maybe_rstrip(s: tuple[int, str]) -> tuple[int, str]:
             return (s[0], s[1].rstrip())
 
-        return _maybe_rstrip(await self.sh.sh(*((self.git_path,) + args), env=git_env, **kwargs))
+        return _maybe_rstrip(await self.sh.sh(*((self.git_path, *args)), env=git_env, **kwargs))
 
     async def git_return_code(self, *args: str, **kwargs: Any) -> int:
-        return (await self.git(raiseonerror=False, *args, **kwargs))[0]
+        return (await self.git(*args, raiseonerror=False, **kwargs))[0]
 
     async def git_stdout(self, *args: str, **kwargs: Any) -> str:
         return (await self.git(*args, **kwargs))[1]
@@ -503,8 +502,9 @@ class Git:
             if not self.base_branch_globs:
                 return [f"{self.remote_name}/{self.main_branch}"]
             ref_filters.append(f"refs/remotes/{self.remote_name}/{self.main_branch}")
-            for b in self.base_branch_globs:
-                ref_filters.append(f"refs/remotes/{self.remote_name}/" + b)
+            ref_filters.extend(
+                f"refs/remotes/{self.remote_name}/{b}" for b in self.base_branch_globs
+            )
         else:
             ref_filters.append(f"refs/remotes/{self.remote_name}/{self.main_branch}")
             ref_filters.append(f"refs/remotes/{self.remote_name}/*")
@@ -572,14 +572,12 @@ class Git:
         )
         current_branch = branch_out if ret_code == 0 else None
         for c in candidates:
-            if current_branch is not None and c == f"{self.remote_name}/{current_branch}":
+            if (
+                current_branch is not None and c == f"{self.remote_name}/{current_branch}"
+            ) or c == f"{self.remote_name}/{self.main_branch}":
                 ret = c
                 break
-            elif c == f"{self.remote_name}/{self.main_branch}":
-                ret = c
-                break
-            elif c > ret:
-                ret = c
+            ret = max(ret, c)
         return ret
 
     async def commit_tree(self, commit_info: CommitHeader) -> GitCommitHash:
@@ -814,8 +812,7 @@ class Git:
             if len(group) != 2:
                 continue
             ret.append(f"@@ {group[0]}, {group[1]}")
-            for i in range(group[0], group[1]):
-                ret.append(lines[i])
+            ret.extend(lines[i] for i in range(group[0], group[1]))
 
         logging.info("\n".join(ret))
 
@@ -917,7 +914,7 @@ class Credential:
 
     async def _run(self, subcommand: str, args: dict[str, str]) -> dict[str, str]:
         input_str = "\n".join(f"{k}={v}" for k, v in args.items())
-        logging.debug("credential input:\n{}".format(input_str))
+        logging.debug(f"credential input:\n{input_str}")
         stdout_str = await self.git_ctx.git_stdout(
             "credential", subcommand, input_str=input_str, quiet=True
         )

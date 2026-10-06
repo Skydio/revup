@@ -54,10 +54,11 @@ def merge_commit_messages(topics: TopicStack, commits: list[git.CommitHeader]) -
 
     merged = "\n\n".join(bodies)
 
-    tag_lines = []
-    for tag in TAG_ORDER:
-        if tag in all_tags:
-            tag_lines.append(f"{tag.capitalize()}: {', '.join(sorted(all_tags[tag]))}")
+    tag_lines = [
+        f"{tag.capitalize()}: {', '.join(sorted(all_tags[tag]))}"
+        for tag in TAG_ORDER
+        if tag in all_tags
+    ]
     if tag_lines:
         merged += "\n\n" + "\n".join(tag_lines)
 
@@ -129,18 +130,15 @@ async def restack(topics: TopicStack, topicless_last: bool, squash: bool = False
         # doesn't automatically drop empty commits if they're been merged.
         if not topic_is_empty:
             to_pick.extend(this_topic)
-    no_topic = []
-    for commit in topics.commits:
-        if commit not in to_pick and not await topics.git_ctx.have_identical_trees(
-            commit.commit_id, commit.parents[0]
-        ):
-            no_topic.append(commit)
+    no_topic = [
+        commit
+        for commit in topics.commits
+        if commit not in to_pick
+        and not await topics.git_ctx.have_identical_trees(commit.commit_id, commit.parents[0])
+    ]
 
     new_parent = topics.commits[0].parents[0]
-    if topicless_last:
-        to_restack = to_pick + no_topic
-    else:
-        to_restack = no_topic + to_pick
+    to_restack = to_pick + no_topic if topicless_last else no_topic + to_pick
     for commit in to_restack:
         try:
             new_parent = await topics.git_ctx.synthetic_cherry_pick_from_commit(commit, new_parent)

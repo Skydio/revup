@@ -362,12 +362,12 @@ async def main(revup_parser: RevupArgParser, all_parsers: list[RevupArgParser]) 
 
         return await toolkit.main(args=args, git_ctx=git_ctx)
 
-    elif args.cmd == "cherry-pick":
+    if args.cmd == "cherry-pick":
         from revup import cherry_pick
 
         return await cherry_pick.main(args=args, git_ctx=git_ctx, conf=conf)
 
-    elif args.cmd in ["commit", "amend"]:
+    if args.cmd in ["commit", "amend"]:
         from revup import amend
 
         # "commit" is an alias of "amend --insert"
@@ -382,7 +382,7 @@ async def main(revup_parser: RevupArgParser, all_parsers: list[RevupArgParser]) 
 
         return await amend.main(args=args, git_ctx=git_ctx)
 
-    elif args.cmd == "restack":
+    if args.cmd == "restack":
         from revup import restack
 
         return await restack.main(args=args, git_ctx=git_ctx)

@@ -78,7 +78,7 @@ class RevupForgeException(Exception):
         messages = []
         self.types = []
         for error in self.error_json:
-            self.types.append(error["type"] if "type" in error else "Unknown")
+            self.types.append(error.get("type", "Unknown"))
             messages.append(error["message"])
 
         self.type = " ".join(self.types) if self.types else "None"
