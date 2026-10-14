@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+from collections.abc import Callable
 
 from revup import config, git
 from revup.core_types import GitCommitHash, GitTreeHash, RevupUsageException
@@ -71,6 +72,19 @@ async def main(args: argparse.Namespace, git_ctx: git.Git, conf: config.Config) 
         if not explicit_base:
             explicit_base = pr_base
 
+    return await squash_and_cherry_pick(git_ctx, branch_arg, explicit_base)
+
+
+async def squash_and_cherry_pick(
+    git_ctx: git.Git,
+    branch_arg: str,
+    explicit_base: str | None,
+    rewrite_msg: Callable[[str], str] | None = None,
+) -> int:
+    """
+    Squash branch_arg relative to its base into one commit and cherry-pick it onto HEAD.
+    The commit message can be rewritten by rewrite_msg.
+    """
     branch_to_pick = await find_branch_fetch_if_necessary(git_ctx, branch_arg)
 
     if explicit_base:
@@ -114,6 +128,8 @@ async def main(args: argparse.Namespace, git_ctx: git.Git, conf: config.Config) 
     )[0]
     commit_info.tree = GitTreeHash(branch_to_pick + "^{tree}")
     commit_info.parents = [GitCommitHash(parent)]
+    if rewrite_msg:
+        commit_info.commit_msg = rewrite_msg(commit_info.commit_msg)
 
     to_cherry_pick = await git_ctx.commit_tree(commit_info)
 

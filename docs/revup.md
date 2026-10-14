@@ -117,6 +117,10 @@ cache. Can also change the commit text.
 : Create a squashed commit that represents the changes made in the
 given branch relative to its base branch, then cherry-pick it.
 
+**revup download**
+: Cherry-pick another person's pull request or branch as a single
+commit that records where it came from.
+
 **revup upload**
 : Upload and push the current stack of code reviews.
 

@@ -132,6 +132,10 @@ def build_parser() -> tuple[RevupArgParser, list[RevupArgParser]]:
         "cherry-pick",
         add_help=False,
     )
+    download_parser = subparsers.add_parser(
+        "download",
+        add_help=False,
+    )
     amend_parser = subparsers.add_parser("amend", aliases=["commit"], add_help=False)
     config_parser = subparsers.add_parser(
         "config",
@@ -151,6 +155,7 @@ def build_parser() -> tuple[RevupArgParser, list[RevupArgParser]]:
         revup_parser,
         amend_parser,
         cherry_pick_parser,
+        download_parser,
         restack_parser,
         upload_parser,
     ]
@@ -224,6 +229,10 @@ def build_parser() -> tuple[RevupArgParser, list[RevupArgParser]]:
     cherry_pick_parser.add_argument("--help", "-h", action=HelpAction, nargs=0)
     cherry_pick_parser.add_argument("branch_or_pr_url", nargs=1)
     cherry_pick_parser.add_argument("--base-branch", "-b")
+
+    download_parser.add_argument("--help", "-h", action=HelpAction, nargs=0)
+    download_parser.add_argument("pr_or_branch", nargs=1)
+    download_parser.add_argument("--base-branch", "-b")
 
     config_parser.add_argument("--help", "-h", action=HelpAction, nargs=0)
     config_flag_arg = config_parser.add_argument("flag", nargs=1)
@@ -366,6 +375,11 @@ async def main(revup_parser: RevupArgParser, all_parsers: list[RevupArgParser]) 
         from revup import cherry_pick
 
         return await cherry_pick.main(args=args, git_ctx=git_ctx, conf=conf)
+
+    if args.cmd == "download":
+        from revup import download
+
+        return await download.main(args=args, git_ctx=git_ctx, conf=conf)
 
     if args.cmd in ["commit", "amend"]:
         from revup import amend
