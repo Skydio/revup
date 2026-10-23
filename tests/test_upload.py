@@ -541,6 +541,15 @@ class TestUploadDraftTag:
             assert topics.topics["alpha"].reviews["origin/main"].is_draft is False
 
     @async_test
+    async def test_empty_draft_tag_treated_as_absent(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            await env.commit("feat\n\nTopic: alpha\nDraft:", {"a.txt": "a"})
+
+            topics = await run_upload_pipeline(env)
+            assert topics.topics["alpha"].reviews["origin/main"].is_draft is False
+
+    @async_test
     async def test_invalid_draft_tag_raises(self):
         async with GitTestEnvironment() as env:
             await setup_repo(env)
