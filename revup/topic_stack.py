@@ -148,7 +148,7 @@ def get_bool_tag(tags: dict[str, set[str]], tag: str, default: bool = False) -> 
     Return the value of a tag that accepts the same boolean values as config options,
     or the default if the tag isn't given.
     """
-    if tag not in tags:
+    if not tags.get(tag):
         return default
     value = min(tags[tag]).lower()
     if len(tags[tag]) > 1 or value not in ("true", "false"):
@@ -395,7 +395,9 @@ class TopicStack:
                 tag, val = matched
                 if tag in (TAG_BRANCH, TAG_RELATIVE_BRANCH):
                     val = {self.git_ctx.ensure_branch_prefix(b) for b in val}
-                ret[tag].update(val)
+                # A valueless tag is treated as absent
+                if val:
+                    ret[tag].update(val)
             else:
                 trimmed_msg.append(ln)
         return ret, "\n".join(trimmed_msg).strip()
