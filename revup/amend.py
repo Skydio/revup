@@ -262,6 +262,8 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
     )
 
     args.edit = args.edit or args.insert
+    if args.message is not None and (not args.edit or args.drop):
+        raise RevupUsageException("--message can only be used with --edit")
     has_diff = has_staged or has_unstaged or args.drop
     if not has_diff and not args.edit and not args.last_touched:
         return 0
@@ -360,24 +362,27 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
         stack[0].commit_msg = ""
 
     if args.edit and not args.drop:
-        new_msg = await invoke_editor_for_commit_msg(
-            git_ctx,
-            git_ctx.editor,
-            await get_topic_summary(topics) if args.parse_topics else "",
-            stack[0].commit_msg,
-            (
-                await git_ctx.git_stdout("diff-index", "--cached", "-r", "-M", "HEAD", "--stat")
-                if has_diff
-                else ""
-            ),
-            (
-                ""
-                if args.insert
-                else await git_ctx.git_stdout(
-                    "diff-tree", "-r", "-M", commit + "~", commit, "--stat"
-                )
-            ),
-        )
+        if args.message is not None:
+            new_msg = args.message.strip()
+        else:
+            new_msg = await invoke_editor_for_commit_msg(
+                git_ctx,
+                git_ctx.editor,
+                await get_topic_summary(topics) if args.parse_topics else "",
+                stack[0].commit_msg,
+                (
+                    await git_ctx.git_stdout("diff-index", "--cached", "-r", "-M", "HEAD", "--stat")
+                    if has_diff
+                    else ""
+                ),
+                (
+                    ""
+                    if args.insert
+                    else await git_ctx.git_stdout(
+                        "diff-tree", "-r", "-M", commit + "~", commit, "--stat"
+                    )
+                ),
+            )
         if len(new_msg.strip()) == 0:
             logging.info("Exited due to empty commit message.")
             return 1
