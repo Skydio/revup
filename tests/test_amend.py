@@ -17,6 +17,7 @@ def make_amend_args(**kwargs):
     defaults = {
         "ref_or_topic": None,
         "edit": False,
+        "message": None,
         "insert": False,
         "drop": False,
         "last_touched": False,
@@ -296,6 +297,29 @@ class TestAmendInsert:
 
             assert ret == 0
             assert (await env.get_commit_message()).strip() == "new commit"
+
+    @async_test
+    async def test_message_skips_editor(self):
+        async with GitTestEnvironment() as env:
+            await env.commit("root", {"root.txt": "r"})
+            await env.commit("first", {"a.txt": "a"})
+
+            env.git_ctx.editor = "false"
+            args = make_amend_args(edit=True, message="from flag\n")
+            ret = await amend.main(args, env.git_ctx)
+
+            assert ret == 0
+            assert (await env.get_commit_message()).strip() == "from flag"
+
+    @async_test
+    async def test_message_without_edit_raises(self):
+        async with GitTestEnvironment() as env:
+            await env.commit("root", {"root.txt": "r"})
+            await env.commit("first", {"a.txt": "a"})
+
+            args = make_amend_args(edit=False, message="from flag")
+            with pytest.raises(RevupUsageException, match="--message"):
+                await amend.main(args, env.git_ctx)
 
 
 class TestAmendAll:
