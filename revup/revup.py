@@ -213,6 +213,7 @@ def build_parser() -> tuple[RevupArgParser, list[RevupArgParser]]:
     ref_or_topic_arg = amend_parser.add_argument("ref_or_topic", nargs="?")
     ref_or_topic_arg.completer = topic_completer  # type: ignore[attr-defined]
     amend_parser.add_argument("--edit", "-s", default=True, action="store_true")
+    amend_parser.add_argument("--message", "-m")
     amend_parser.add_argument("--insert", "-i", action="store_true")
     amend_parser.add_argument("--drop", "-d", action="store_true")
     amend_parser.add_argument("--last-touched", "-l", action="store_true")
