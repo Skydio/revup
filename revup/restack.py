@@ -127,7 +127,7 @@ async def restack(topics: TopicStack, topicless_last: bool, squash: bool = False
             if not await topics.git_ctx.have_identical_trees(commit.commit_id, commit.parents[0]):
                 topic_is_empty = False
         # Drop empty topics, ie topics with all empty commits. git pull --rebase
-        # doesn't automatically drop empty commits if they're been merged.
+        # doesn't automatically drop empty commits if they've been merged.
         if not topic_is_empty:
             to_pick.extend(this_topic)
     no_topic = [
