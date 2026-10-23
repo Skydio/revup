@@ -70,7 +70,7 @@ class GitHubEndpoint:
     # Passed to http as 'verify'.
     verify: str | None
 
-    # Client side certificate to use when connecitng.
+    # Client side certificate to use when connecting.
     # Passed to http as 'cert'.
     cert: str | tuple[str, str] | None
 
