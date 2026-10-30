@@ -15,10 +15,18 @@ def chain(*names):
     return [("\u3000" * depth) + "└" + name for depth, name in enumerate(names)]
 
 
+async def make_remote_branch(env, name, files):
+    """Create origin/<name> with one extra commit over the current HEAD, leaving HEAD alone."""
+    head = await env.get_commit_hash()
+    await env.commit(f"{name} work", files)
+    await env.git_ctx.git("branch", f"origin/{name}", "HEAD")
+    await env.git_ctx.git("reset", "--hard", head)
+
+
 async def run_optimize_stack(env, capsys, ignore_existing=False, write=False):
     args = argparse.Namespace(
         toolkit_cmd="optimize-stack",
-        base_branch=None,
+        base_branch="main",
         ignore_existing=ignore_existing,
         write=write,
     )
@@ -224,3 +232,44 @@ class TestOptimizeStackWrite:
                 ret, out = await run_optimize_stack(env, capsys, write=True)
             assert ret == 1
             assert await env.get_commit_hash() == head
+
+
+class TestOptimizeStackBranches:
+    @async_test
+    async def test_topic_targeting_other_branch_is_skipped(self, capsys):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            await make_remote_branch(env, "release", {"d.txt": "d"})
+            await env.commit("one\n\nTopic: one\nBranch: release", {"a.txt": "a1"})
+            await env.commit("two\n\nTopic: two\nBranch: main", {"b.txt": "b1"})
+
+            ret, out = await run_optimize_stack(env, capsys)
+            assert ret == 0
+            assert out == chain("two")
+
+    @async_test
+    async def test_relative_branch_topic_starts_tree_on_that_branch(self, capsys):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            await make_remote_branch(env, "feature", {"a.txt": "f"})
+            await env.commit("one\n\nTopic: one\nRelative-Branch: feature", {"b.txt": "b1"})
+            await env.commit("two\n\nTopic: two", {"b.txt": "b2"})
+            await env.commit("three\n\nTopic: three", {"c.txt": "c1"})
+
+            ret, out = await run_optimize_stack(env, capsys)
+            assert ret == 0
+            assert out == ["feature:", *chain("one", "two")] + chain("three")
+
+    @async_test
+    async def test_relative_branch_topic_cannot_use_base_branch_trees(self, capsys, caplog):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            await make_remote_branch(env, "feature", {"d.txt": "d"})
+            await env.commit("one\n\nTopic: one", {"a.txt": "a1"})
+            await env.commit("two\n\nTopic: two\nRelative-Branch: feature", {"a.txt": "a2"})
+
+            with caplog.at_level(logging.ERROR):
+                ret, out = await run_optimize_stack(env, capsys)
+            assert ret == 1
+            assert out == chain("one")
+            assert "Topic two can't be placed" in caplog.text
