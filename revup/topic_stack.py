@@ -157,19 +157,24 @@ def match_commit_tag(line: str) -> tuple[str, set[str]] | None:
     return tag, val
 
 
-def trim_nonidentifying_tags(commit_msg: str) -> str:
+def strip_tag_lines(commit_msg: str, should_strip: Callable[[str, set[str]], bool]) -> str:
     """
-    Return a version of the message with nonidentifying and valueless tags removed.
+    Return a version of the message without the tag lines whose name and values match.
     """
     ret = []
     for ln in commit_msg.split("\n"):
         matched = match_commit_tag(ln)
-        if matched is not None:
-            tag, val = matched
-            if tag in NONIDENTIFYING_TAGS or not val:
-                continue
+        if matched is not None and should_strip(*matched):
+            continue
         ret.append(ln)
     return "\n".join(ret).strip()
+
+
+def trim_nonidentifying_tags(commit_msg: str) -> str:
+    """
+    Return a version of the message with nonidentifying and valueless tags removed.
+    """
+    return strip_tag_lines(commit_msg, lambda tag, val: tag in NONIDENTIFYING_TAGS or not val)
 
 
 def get_bool_tag(tags: dict[str, set[str]], tag: str, default: bool = False) -> bool:
@@ -183,6 +188,17 @@ def get_bool_tag(tags: dict[str, set[str]], tag: str, default: bool = False) -> 
     if len(tags[tag]) > 1 or value not in ("true", "false"):
         raise RevupUsageException(f"Invalid tags for {tag}: {tags[tag]}")
     return value == "true"
+
+
+def single_tag(topic: Topic, what: str, values: set[str]) -> str | None:
+    """
+    Return the only value of a tag that allows at most one per topic, or None if unset.
+    """
+    if len(values) > 1:
+        raise RevupUsageException(
+            f"Can't specify more than 1 {what} per topic! Got {values} for topic {topic.name}"
+        )
+    return min(values) if values else None
 
 
 def relative_tags(topic: Topic) -> set[str]:
@@ -677,27 +693,16 @@ class TopicStack:
                     f"Invalid tags for branch-format: {topic.tags[TAG_BRANCH_FORMAT]}"
                 )
 
-            relative_topic = ""
-            relatives = relative_tags(topic)
             if force_relative_chain and last_topic is not None:
                 relative_topic = last_topic
-            elif len(relatives) > 1:
-                raise RevupUsageException(
-                    "Can't specify more than 1 relative topic per topic! Got"
-                    f" {relatives} for topic {name}"
-                )
-            elif len(relatives) == 1:
+            else:
                 # Each topic can have at most 1 relative topic.
                 # If the topic doesn't specify base branches, it will automatically get
                 # all the base branches for the relative topic. However it can't specify
                 # any base branches the relative topic doesn't have.
-                relative_topic = min(relatives)
-                if relative_topic not in self.topics:
-                    logging.warning(
-                        f"Relative topic '{relative_topic}' not found in stack, assuming it was"
-                        " merged"
-                    )
-                    relative_topic = ""
+                relative_topic = self.relative_in_stack(
+                    single_tag(topic, "relative topic", relative_tags(topic))
+                )
 
             if self.forge and self.forge.is_fork:
                 if len(topic.tags[TAG_RELATIVE_BRANCH]) > 1:

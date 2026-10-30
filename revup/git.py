@@ -853,6 +853,17 @@ class Git:
         new_commit_info.parents[0] = new_parent
         return await self.commit_tree(new_commit_info)
 
+    async def reparent_commits(
+        self, commits: list[CommitHeader], new_parent: GitCommitHash
+    ) -> GitCommitHash:
+        """
+        Recreate the commits in order on top of a new parent, keeping each one's tree, and
+        return the new tip. Much faster than cherry-picking when only metadata changed.
+        """
+        for commit_info in commits:
+            new_parent = await self.cherry_pick_from_tree(commit_info, new_parent)
+        return new_parent
+
     async def make_virtual_diff_target(
         self,
         old_base: GitCommitHash,
