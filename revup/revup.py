@@ -329,6 +329,13 @@ def build_parser() -> tuple[RevupArgParser, list[RevupArgParser]]:
         action="store_true",
         help="Rewrite the stack to record each inferred relative as an Optimized-Relative: tag",
     )
+    toolkit_optimize_stack.add_argument(
+        "--force-write",
+        "-f",
+        action="store_true",
+        help="Rewrite the stack to replace all existing Relative: and Optimized-Relative: tags"
+        " with Relative: tags for the inferred relatives",
+    )
 
     if "_ARGCOMPLETE" in os.environ:
         import argcomplete

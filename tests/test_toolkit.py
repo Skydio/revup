@@ -1,9 +1,12 @@
 import argparse
 import logging
 
+import pytest
+
 from git_env import GitTestEnvironment, async_test
 
 from revup import toolkit
+from revup.core_types import RevupUsageException
 
 
 async def setup_repo(env):
@@ -23,12 +26,15 @@ async def make_remote_branch(env, name, files):
     await env.git_ctx.git("reset", "--hard", head)
 
 
-async def run_optimize_stack(env, capsys, ignore_existing=False, write=False):
+async def run_optimize_stack(
+    env, capsys, ignore_existing=False, write=False, force_write=False
+):
     args = argparse.Namespace(
         toolkit_cmd="optimize-stack",
         base_branch="main",
         ignore_existing=ignore_existing,
         write=write,
+        force_write=force_write,
     )
     ret = await toolkit.main(args, env.git_ctx)
     return ret, capsys.readouterr().out.splitlines()
@@ -273,3 +279,31 @@ class TestOptimizeStackBranches:
             assert ret == 1
             assert out == chain("one")
             assert "Topic two can't be placed" in caplog.text
+
+
+class TestOptimizeStackForceWrite:
+    @async_test
+    async def test_force_write_replaces_all_relative_tags(self, capsys):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            await env.commit("one\n\nTopic: one", {"a.txt": "a1"})
+            await env.commit("two\n\nTopic: two", {"a.txt": "a2"})
+            await env.commit("three\n\nTopic: three\nRelative: one", {"b.txt": "b1"})
+            await env.commit("four\n\nTopic: four\nOptimized-Relative: one", {"c.txt": "c1"})
+
+            ret, out = await run_optimize_stack(env, capsys, force_write=True)
+            assert ret == 0
+            assert out == chain("one", "two", "three") + chain("four")
+            assert await env.get_commit_message("HEAD~3") == "one\n\nTopic: one"
+            assert await env.get_commit_message("HEAD~2") == "two\n\nTopic: two\nRelative: one"
+            assert await env.get_commit_message("HEAD~1") == "three\n\nTopic: three\nRelative: two"
+            assert await env.get_commit_message("HEAD") == "four\n\nTopic: four"
+
+    @async_test
+    async def test_write_and_force_write_are_exclusive(self, capsys):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            await env.commit("one\n\nTopic: one", {"a.txt": "a1"})
+
+            with pytest.raises(RevupUsageException, match="mutually exclusive"):
+                await run_optimize_stack(env, capsys, write=True, force_write=True)
