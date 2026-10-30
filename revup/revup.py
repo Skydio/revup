@@ -306,6 +306,24 @@ def build_parser() -> tuple[RevupArgParser, list[RevupArgParser]]:
         help="Print the titles for all commits within a topic",
     )
 
+    toolkit_optimize_stack = toolkit_subparsers.add_parser(
+        "optimize-stack",
+        description="Greedily arrange topics into relative chains of low total depth. Prints"
+        " each tree in the review graph format, roots in the order they were found.",
+    )
+    toolkit_optimize_stack.add_argument(
+        "--base-branch",
+        "-b",
+        help="Use the given branch as the base instead of autodetecting.",
+    )
+    toolkit_optimize_stack.add_argument(
+        "--ignore-existing",
+        "-i",
+        action="store_true",
+        help="Ignore existing Relative: tags instead of keeping each topic somewhere after its"
+        " relative in the same tree",
+    )
+
     if "_ARGCOMPLETE" in os.environ:
         import argcomplete
 
