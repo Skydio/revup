@@ -66,6 +66,7 @@ TAG_BRANCH = "branch"
 TAG_LABEL = "label"
 TAG_TOPIC = "topic"
 TAG_RELATIVE = "relative"
+TAG_OPTIMIZED_RELATIVE = "optimized-relative"
 TAG_RELATIVE_BRANCH = "relative-branch"
 TAG_UPLOADER = "uploader"
 TAG_UPDATE_PR_BODY = "update-pr-body"
@@ -75,6 +76,7 @@ VALID_TAGS = {
     TAG_BRANCH,
     TAG_LABEL,
     TAG_RELATIVE,
+    TAG_OPTIMIZED_RELATIVE,
     TAG_RELATIVE_BRANCH,
     TAG_REVIEWER,
     TAG_ASSIGNEE,
@@ -87,6 +89,7 @@ VALID_TAGS = {
 # Tags that don't determine which pr a commit belongs to, so a cherry-picked commit still
 # reaches the same pr without them.
 NONIDENTIFYING_TAGS = {
+    TAG_OPTIMIZED_RELATIVE,
     TAG_LABEL,
     TAG_REVIEWER,
     TAG_ASSIGNEE,
@@ -154,19 +157,24 @@ def match_commit_tag(line: str) -> tuple[str, set[str]] | None:
     return tag, val
 
 
-def trim_nonidentifying_tags(commit_msg: str) -> str:
+def strip_tag_lines(commit_msg: str, should_strip: Callable[[str, set[str]], bool]) -> str:
     """
-    Return a version of the message with nonidentifying and valueless tags removed.
+    Return a version of the message without the tag lines whose name and values match.
     """
     ret = []
     for ln in commit_msg.split("\n"):
         matched = match_commit_tag(ln)
-        if matched is not None:
-            tag, val = matched
-            if tag in NONIDENTIFYING_TAGS or not val:
-                continue
+        if matched is not None and should_strip(*matched):
+            continue
         ret.append(ln)
     return "\n".join(ret).strip()
+
+
+def trim_nonidentifying_tags(commit_msg: str) -> str:
+    """
+    Return a version of the message with nonidentifying and valueless tags removed.
+    """
+    return strip_tag_lines(commit_msg, lambda tag, val: tag in NONIDENTIFYING_TAGS or not val)
 
 
 def get_bool_tag(tags: dict[str, set[str]], tag: str, default: bool = False) -> bool:
@@ -191,6 +199,15 @@ def single_tag(topic: Topic, what: str, values: set[str]) -> str | None:
             f"Can't specify more than 1 {what} per topic! Got {values} for topic {topic.name}"
         )
     return min(values) if values else None
+
+
+def relative_tags(topic: Topic) -> set[str]:
+    """
+    Return the relative topic values in effect. Optimized-Relative is written by
+    "revup toolkit optimize-stack" and takes precedence over Relative so that topics can be
+    inserted into an existing chain.
+    """
+    return topic.tags[TAG_OPTIMIZED_RELATIVE] or topic.tags[TAG_RELATIVE]
 
 
 def add_tags(original: dict[str, set[str]], new: dict[str, set[str]]) -> None:
@@ -613,8 +630,8 @@ class TopicStack:
         ret = set(limit_topics)
         for name in limit_topics:
             topic = self.topics.get(name)
-            while topic is not None and len(topic.tags[TAG_RELATIVE]) == 1:
-                relative_name = min(topic.tags[TAG_RELATIVE])
+            while topic is not None and len(relative_tags(topic)) == 1:
+                relative_name = min(relative_tags(topic))
                 if relative_name in ret:
                     break
                 ret.add(relative_name)
@@ -684,7 +701,7 @@ class TopicStack:
                 # all the base branches for the relative topic. However it can't specify
                 # any base branches the relative topic doesn't have.
                 relative_topic = self.relative_in_stack(
-                    single_tag(topic, "relative topic", topic.tags[TAG_RELATIVE])
+                    single_tag(topic, "relative topic", relative_tags(topic))
                 )
 
             if self.forge and self.forge.is_fork:

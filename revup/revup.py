@@ -323,6 +323,12 @@ def build_parser() -> tuple[RevupArgParser, list[RevupArgParser]]:
         help="Ignore existing Relative: tags instead of keeping each topic somewhere after its"
         " relative in the same tree",
     )
+    toolkit_optimize_stack.add_argument(
+        "--write",
+        "-w",
+        action="store_true",
+        help="Rewrite the stack to record each inferred relative as an Optimized-Relative: tag",
+    )
 
     if "_ARGCOMPLETE" in os.environ:
         import argcomplete

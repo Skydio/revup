@@ -231,6 +231,36 @@ class TestUploadRelativeTopics:
             assert b_content == "b"
 
     @async_test
+    async def test_optimized_relative_acts_as_relative(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            await env.commit("base\n\nTopic: parent-feat", {"a.txt": "a"})
+            await env.commit(
+                "child\n\nTopic: child-feat\nOptimized-Relative: parent-feat", {"b.txt": "b"}
+            )
+
+            topics = await run_upload_pipeline(env)
+            parent_review = topics.topics["parent-feat"].reviews["origin/main"]
+            child_review = topics.topics["child-feat"].reviews["origin/main"]
+            assert child_review.base_ref == parent_review.new_commits[-1]
+
+    @async_test
+    async def test_optimized_relative_overrides_relative(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            await env.commit("first\n\nTopic: first", {"a.txt": "a"})
+            await env.commit("second\n\nTopic: second\nRelative: first", {"b.txt": "b"})
+            await env.commit(
+                "third\n\nTopic: third\nRelative: first\nOptimized-Relative: second",
+                {"c.txt": "c"},
+            )
+
+            topics = await run_upload_pipeline(env)
+            second_review = topics.topics["second"].reviews["origin/main"]
+            third_review = topics.topics["third"].reviews["origin/main"]
+            assert third_review.base_ref == second_review.new_commits[-1]
+
+    @async_test
     async def test_three_level_chain_base_refs(self):
         async with GitTestEnvironment() as env:
             await setup_repo(env)
@@ -384,7 +414,8 @@ class TestUploadTrimTags:
             await setup_repo(env)
             await env.commit(
                 "feat title\n\nBody text\n\nTopic: alpha\nRelative:\nBranch: main\n"
-                "Reviewer: user1\nLabel: bug\nAssignee: user2\nUpdate-Pr-Body: false\nDraft: true",
+                "Reviewer: user1\nLabel: bug\nAssignee: user2\nUpdate-Pr-Body: false\nDraft: true\n"
+                "Optimized-Relative: beta",
                 {"a.txt": "a"},
             )
 
@@ -403,6 +434,7 @@ class TestUploadTrimTags:
                 "Assignee:",
                 "Update-Pr-Body:",
                 "Draft:",
+                "Optimized-Relative:",
             ):
                 assert trimmed not in msg
 

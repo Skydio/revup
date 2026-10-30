@@ -84,6 +84,12 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
         forest = await optimize_stack.build_forest(git_ctx, topics, args.ignore_existing)
         for tree in forest.trees:
             print(optimize_stack.format_tree(forest.topics(tree)), end="")
+        if args.write:
+            rewritten = await optimize_stack.write_tags(git_ctx, topics, forest)
+            if rewritten == 0:
+                logging.info(f"\nNothing to change")
+            else:
+                logging.info(f"\nUpdated relative tags in {rewritten} commit(s)")
         untopiced = len(topics.commits) - len(forest.topic_of)
         for name, reason in forest.failed.items():
             logging.error(f"Topic {name} can't be placed in any tree: {reason}")

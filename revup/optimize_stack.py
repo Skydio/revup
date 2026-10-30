@@ -11,7 +11,14 @@ from dataclasses import dataclass
 
 from revup import git
 from revup.core_types import CommitHeader, GitCommitHash, GitConflictException
-from revup.topic_stack import TAG_RELATIVE, TopicStack, format_graph, single_tag
+from revup.topic_stack import (
+    TAG_OPTIMIZED_RELATIVE,
+    TAG_RELATIVE,
+    TopicStack,
+    format_graph,
+    single_tag,
+    strip_tag_lines,
+)
 
 
 @dataclass
@@ -175,3 +182,45 @@ def format_tree(chain: list[str]) -> str:
     return format_graph(
         chain[0], lambda name: name, lambda name: [following[name]] if name in following else []
     )
+
+
+async def write_tags(git_ctx: git.Git, topics: TopicStack, forest: Forest) -> int:
+    """
+    Rewrite the stack so the first commit of each placed topic carries an Optimized-Relative
+    tag naming the topic before it in its tree. No tag is written for a topic that heads a
+    tree or whose Relative tag already names the same topic. Stale Optimized-Relative tags are
+    removed, failed topics are left alone, and trees are reused since contents don't change.
+    Returns the number of commits whose message changed.
+    """
+    inferred: dict[str, str | None] = {}
+    for tree in forest.trees:
+        chain = forest.topics(tree)
+        inferred.update(zip(chain, [None, *chain]))
+
+    new_msgs: dict[GitCommitHash, str] = {}
+    tagged: set[str] = set()
+    for commit in topics.commits:
+        name = forest.topic_of.get(commit.commit_id)
+        if name not in inferred:
+            continue
+        msg = strip_tag_lines(commit.commit_msg, lambda tag, _: tag == TAG_OPTIMIZED_RELATIVE)
+        relative = inferred[name]
+        if name not in tagged:
+            tagged.add(name)
+            if relative is not None and relative not in topics.topics[name].tags[TAG_RELATIVE]:
+                msg += f"\nOptimized-Relative: {relative}"
+        if msg != commit.commit_msg:
+            new_msgs[commit.commit_id] = msg
+    if not new_msgs:
+        return 0
+
+    first = next(i for i, c in enumerate(topics.commits) if c.commit_id in new_msgs)
+    for commit in topics.commits[first:]:
+        commit.commit_msg = new_msgs.get(commit.commit_id, commit.commit_msg)
+    new_head = await git_ctx.reparent_commits(
+        topics.commits[first:], topics.commits[first].parents[0]
+    )
+    await git_ctx.soft_reset(
+        new_head, {"GIT_REFLOG_ACTION": "revup toolkit optimize-stack --write"}
+    )
+    return len(new_msgs)
