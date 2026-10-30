@@ -5,11 +5,12 @@ import logging
 import re
 import subprocess
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
+from typing import TypeVar
 
 from rich import get_console
 from rich.markup import escape
@@ -65,6 +66,7 @@ TAG_BRANCH = "branch"
 TAG_LABEL = "label"
 TAG_TOPIC = "topic"
 TAG_RELATIVE = "relative"
+TAG_OPTIMIZED_RELATIVE = "optimized-relative"
 TAG_RELATIVE_BRANCH = "relative-branch"
 TAG_UPLOADER = "uploader"
 TAG_UPDATE_PR_BODY = "update-pr-body"
@@ -74,6 +76,7 @@ VALID_TAGS = {
     TAG_BRANCH,
     TAG_LABEL,
     TAG_RELATIVE,
+    TAG_OPTIMIZED_RELATIVE,
     TAG_RELATIVE_BRANCH,
     TAG_REVIEWER,
     TAG_ASSIGNEE,
@@ -86,6 +89,7 @@ VALID_TAGS = {
 # Tags that don't determine which pr a commit belongs to, so a cherry-picked commit still
 # reaches the same pr without them.
 NONIDENTIFYING_TAGS = {
+    TAG_OPTIMIZED_RELATIVE,
     TAG_LABEL,
     TAG_REVIEWER,
     TAG_ASSIGNEE,
@@ -97,6 +101,31 @@ RE_COMMIT_LABEL = re.compile(r"^(?P<label1>[a-zA-Z\-_0-9]+):.*|^\[(?P<label2>[a-
 
 PATCHSETS_FIRST_LINE = "| # | head | base | diff | date | summary |\r\n| - | - | - | - | - | - |"
 REVIEW_GRAPH_FIRST_LINE = "Reviews in this chain:\r\n"
+# Indentation used under a last child in the review graph
+GRAPH_INDENT = "\u3000"
+
+T = TypeVar("T")
+
+
+def format_graph(root: T, label: Callable[[T], str], children: Callable[[T], list[T]]) -> str:
+    """
+    Render a tree in the style of the review graph comment: one node per line with box-drawing
+    connectors, each line newline-terminated.
+    """
+    lines: list[str] = []
+
+    def helper(node: T, back: str, prefix: str) -> None:
+        lines.append(f"{back}{prefix}{label(node)}\n")
+        kids = children(node)
+        for i, child in enumerate(kids):
+            helper(
+                child,
+                back + (GRAPH_INDENT if prefix == "└" else "│"),
+                "└" if i == len(kids) - 1 else "├",
+            )
+
+    helper(root, "", "└")
+    return "".join(lines)
 
 
 def match_commit_tag(line: str) -> tuple[str, set[str]] | None:
@@ -154,6 +183,15 @@ def get_bool_tag(tags: dict[str, set[str]], tag: str, default: bool = False) -> 
     if len(tags[tag]) > 1 or value not in ("true", "false"):
         raise RevupUsageException(f"Invalid tags for {tag}: {tags[tag]}")
     return value == "true"
+
+
+def relative_tags(topic: Topic) -> set[str]:
+    """
+    Return the relative topic values in effect. Optimized-Relative is written by
+    "revup toolkit optimize-stack" and takes precedence over Relative so that topics can be
+    inserted into an existing chain.
+    """
+    return topic.tags[TAG_OPTIMIZED_RELATIVE] or topic.tags[TAG_RELATIVE]
 
 
 def add_tags(original: dict[str, set[str]], new: dict[str, set[str]]) -> None:
@@ -554,6 +592,20 @@ class TopicStack:
                 add_tags(self.topics[name].tags, parsed_tags)
         self.populated = True
 
+    def relative_in_stack(self, relative: str | None) -> str:
+        """
+        Return the given relative topic name if it's in the stack, otherwise "" since a missing
+        relative topic is assumed to have been merged.
+        """
+        if relative is None:
+            return ""
+        if relative not in self.topics:
+            logging.warning(
+                f"Relative topic '{relative}' not found in stack, assuming it was merged"
+            )
+            return ""
+        return relative
+
     def relative_ancestors(self, limit_topics: list[str]) -> set[str]:
         """
         Return the given topics along with topics they are transitively relative to, which
@@ -562,8 +614,8 @@ class TopicStack:
         ret = set(limit_topics)
         for name in limit_topics:
             topic = self.topics.get(name)
-            while topic is not None and len(topic.tags[TAG_RELATIVE]) == 1:
-                relative_name = min(topic.tags[TAG_RELATIVE])
+            while topic is not None and len(relative_tags(topic)) == 1:
+                relative_name = min(relative_tags(topic))
                 if relative_name in ret:
                     break
                 ret.add(relative_name)
@@ -626,19 +678,20 @@ class TopicStack:
                 )
 
             relative_topic = ""
+            relatives = relative_tags(topic)
             if force_relative_chain and last_topic is not None:
                 relative_topic = last_topic
-            elif len(topic.tags[TAG_RELATIVE]) > 1:
+            elif len(relatives) > 1:
                 raise RevupUsageException(
                     "Can't specify more than 1 relative topic per topic! Got"
-                    f" {topic.tags[TAG_RELATIVE]} for topic {name}"
+                    f" {relatives} for topic {name}"
                 )
-            elif len(topic.tags[TAG_RELATIVE]) == 1:
+            elif len(relatives) == 1:
                 # Each topic can have at most 1 relative topic.
                 # If the topic doesn't specify base branches, it will automatically get
                 # all the base branches for the relative topic. However it can't specify
                 # any base branches the relative topic doesn't have.
-                relative_topic = min(topic.tags[TAG_RELATIVE])
+                relative_topic = min(relatives)
                 if relative_topic not in self.topics:
                     logging.warning(
                         f"Relative topic '{relative_topic}' not found in stack, assuming it was"
@@ -749,11 +802,7 @@ class TopicStack:
             # Each topic can have at most 1 relative branch.
             # If there is a relative branch, only one base branch can be specified, and all
             # topics in the same chain must use the same relative branch and base branch.
-            if len(topic.tags[TAG_RELATIVE_BRANCH]) > 1:
-                raise RevupUsageException(
-                    "Can't specify more than 1 relative branch per topic! Got"
-                    f" {topic.tags[TAG_RELATIVE_BRANCH]} for topic {name}"
-                )
+            single_tag(topic, "relative branch", topic.tags[TAG_RELATIVE_BRANCH])
             if topic.tags[TAG_RELATIVE_BRANCH] and len(topic.tags[TAG_BRANCH]) > 1:
                 raise RevupUsageException(
                     "Can't specify more than one base branch when there is a relative branch! Got"
@@ -1508,26 +1557,23 @@ class TopicStack:
         """
         ret: dict[str, list[str]] = {}
 
-        def graph_helper(review: Review, back: str, prefix: str) -> int:
-            if review.pr_info is None:
-                return 0
-            review_title = review.pr_update.title or review.pr_info.title
-            num_nodes = 1
-            ret[review.remote_head][0] += f"{back}{prefix}{review.pr_info.url} {review_title}\n"
-            for i, child in enumerate(review.children):
-                ret[child.remote_head] = ret[review.remote_head]
-                num_nodes += graph_helper(
-                    child,
-                    back + ("\u3000" if prefix == "└" else "│"),
-                    ("└" if i == len(review.children) - 1 else "├"),
-                )
-            return num_nodes
+        def label(review: Review) -> str:
+            assert review.pr_info is not None
+            return f"{review.pr_info.url} {review.pr_update.title or review.pr_info.title}"
+
+        def children(review: Review) -> list[Review]:
+            return [c for c in review.children if c.pr_info is not None]
 
         for _, topic, _, review in self.all_reviews_iter():
             if topic.relative_topic is None:
                 # Uses a single element list so all members of the chain reference the same string.
-                ret[review.remote_head] = [""]
-                graph_helper(review, "", "└")
+                graph = [format_graph(review, label, children) if review.pr_info else ""]
+                pending = [review]
+                while pending:
+                    member = pending.pop()
+                    ret[member.remote_head] = graph
+                    if member.pr_info is not None:
+                        pending.extend(member.children)
 
         return ret
 
