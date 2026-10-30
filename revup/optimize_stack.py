@@ -7,13 +7,16 @@ inspecting commit contents.
 from __future__ import annotations
 
 import itertools
+import logging
 from dataclasses import dataclass
 
 from revup import git
 from revup.core_types import CommitHeader, GitCommitHash, GitConflictException
 from revup.topic_stack import (
+    TAG_BRANCH,
     TAG_OPTIMIZED_RELATIVE,
     TAG_RELATIVE,
+    TAG_RELATIVE_BRANCH,
     TopicStack,
     format_graph,
     single_tag,
@@ -23,10 +26,12 @@ from revup.topic_stack import (
 
 @dataclass
 class Tree:
-    # Commits replayed onto the base branch, in stack order
+    # Commits replayed onto the base, in stack order
     commits: list[CommitHeader]
     # Tip of the replayed chain
     head: GitCommitHash
+    # Commit the chain was replayed onto, either the base branch or a Relative-Branch
+    base: GitCommitHash
 
 
 @dataclass
@@ -35,6 +40,8 @@ class Forest:
     # Topics that could not be fully placed, mapped to a description of the failure
     failed: dict[str, str]
     topic_of: dict[GitCommitHash, str]
+    # Relative branch of trees not based on the base branch, keyed by base commit
+    relative_branches: dict[GitCommitHash, str]
     # The conflict behind each failure that was caused by one
     conflicts: dict[str, GitConflictException]
 
@@ -64,12 +71,29 @@ class Builder:
         self.base = base
         self.order = {c.commit_id: i for i, c in enumerate(topics.commits)}
         self.relative_of = {} if ignore_existing else relative_topics(topics)
+        # Topics with a Relative-Branch are based on it instead of the base branch
+        self.relative_branch_of = {
+            name: branch
+            for name, topic in topics.topics.items()
+            if (branch := single_tag(topic, "relative branch", topic.tags[TAG_RELATIVE_BRANCH]))
+        }
+        self.topic_base: dict[str, GitCommitHash] = {}
         self.forest = Forest(
             [],
             {},
             {c.commit_id: name for name, t in topics.topics.items() for c in t.original_commits},
             {},
+            {},
         )
+
+    async def resolve_bases(self) -> None:
+        for name, branch in self.relative_branch_of.items():
+            base = await self.git_ctx.to_commit_hash(branch)
+            self.topic_base[name] = base
+            self.forest.relative_branches[base] = branch
+
+    def base_of(self, name: str) -> GitCommitHash:
+        return self.topic_base.get(name, self.base)
 
     def tree_of(self, name: str) -> Tree | None:
         return next((t for t in self.forest.trees if name in self.forest.topics(t)), None)
@@ -84,32 +108,36 @@ class Builder:
 
     async def merge(self, members: list[Tree]) -> Tree | None:
         """
-        Replay the commits of all members onto the base in stack order, or return None if
-        they don't apply cleanly together.
+        Replay the commits of all members, which share a base, onto it in stack order, or
+        return None if they don't apply cleanly together.
         """
         commits = sorted(
             itertools.chain.from_iterable(t.commits for t in members),
             key=lambda c: self.order[c.commit_id],
         )
-        head = self.base
+        head = base = members[0].base
         for c in commits:
             result = await self.try_pick(c, head)
             if isinstance(result, GitConflictException):
                 return None
             head = result
-        return Tree(commits, head)
+        return Tree(commits, head, base)
 
-    async def merge_until_pick(self, own: Tree | None, commit: CommitHeader) -> bool:
+    async def merge_until_pick(
+        self, own: Tree | None, commit: CommitHeader, eligible: list[Tree]
+    ) -> bool:
         """
-        Merge the topic's own tree (if any) with ever larger subsets of the other trees until
-        the commit cherry-picks onto the result. The successful merge permanently replaces its
-        members.
+        Merge the topic's own tree (if any) with ever larger subsets of the other eligible
+        trees sharing its base until the commit cherry-picks onto the result. The successful
+        merge permanently replaces its members.
         """
         trees = self.forest.trees
         required = [own] if own else []
-        others = [t for t in trees if t is not own]
+        others = [t for t in eligible if t is not own and (own is None or t.base == own.base)]
         for size in range(1 if own else 2, len(others) + 1):
             for combo in itertools.combinations(others, size):
+                if len({t.base for t in combo}) > 1:
+                    continue
                 members = required + list(combo)
                 merged = await self.merge(members)
                 if merged is None:
@@ -129,6 +157,7 @@ class Builder:
         forest = self.forest
         name = forest.topic_of[commit.commit_id]
         own = self.tree_of(name)
+        base = self.base_of(name)
         relative = self.relative_of.get(name)
         if own is None and relative is not None:
             # The topic must land in its relative's tree, which puts it after the relative in
@@ -140,25 +169,36 @@ class Builder:
             if own is None:
                 forest.failed[name] = f"relative topic {relative} appears later in the stack"
                 return
+            if name in self.relative_branch_of and own.base != base:
+                forest.failed[name] = (
+                    f"relative topic {relative} is not on {self.relative_branch_of[name]}"
+                )
+                return
+
+        # A topic with a Relative-Branch can only join trees based on it, any other topic can
+        # join any tree since it inherits the relative branch from the chain
+        eligible = [
+            t for t in forest.trees if name not in self.relative_branch_of or t.base == base
+        ]
 
         # A topic already in a tree must stay there. Otherwise prefer a new independent tree,
-        # then any existing tree in order.
-        candidates: list[Tree | None] = [own] if own else [None, *forest.trees]
+        # then any eligible tree in order.
+        candidates: list[Tree | None] = [own] if own else [None, *eligible]
         first_conflict = None
         for tree in candidates:
-            result = await self.try_pick(commit, self.base if tree is None else tree.head)
+            result = await self.try_pick(commit, base if tree is None else tree.head)
             if isinstance(result, GitConflictException):
                 first_conflict = first_conflict or result
                 continue
             if tree is None:
-                forest.trees.append(Tree([commit], result))
+                forest.trees.append(Tree([commit], result, base))
             else:
                 tree.commits.append(commit)
                 tree.head = result
             return
 
         assert first_conflict is not None
-        if not await self.merge_until_pick(own, commit):
+        if not await self.merge_until_pick(own, commit, eligible):
             forest.failed[name] = f'commit {commit.commit_id[:12]} "{commit.title}" conflicts'
             forest.conflicts[name] = first_conflict
 
@@ -167,21 +207,36 @@ async def build_forest(git_ctx: git.Git, topics: TopicStack, ignore_existing: bo
     builder = Builder(
         git_ctx, topics, await git_ctx.to_commit_hash(topics.base_branch), ignore_existing
     )
+    await builder.resolve_bases()
+
+    # Topics targeting other base branches are left out entirely
+    skipped = {
+        name
+        for name, topic in topics.topics.items()
+        if topic.tags[TAG_BRANCH] and topics.base_branch not in topic.tags[TAG_BRANCH]
+    }
+    for skipped_name in skipped:
+        logging.info(
+            f"Skipping topic {skipped_name} since it doesn't target {topics.base_branch}"
+        )
+
     for commit in topics.commits:
         name = builder.forest.topic_of.get(commit.commit_id)
-        if name is not None and name not in builder.forest.failed:
+        if name is not None and name not in skipped and name not in builder.forest.failed:
             await builder.place(commit)
     return builder.forest
 
 
-def format_tree(chain: list[str]) -> str:
+def format_tree(chain: list[str], relative_branch: str | None = None) -> str:
     """
-    Render a chain of topics as a review graph.
+    Render a chain of topics as a review graph, labeled with its relative branch if it isn't
+    based on the base branch.
     """
     following = dict(zip(chain, chain[1:]))
-    return format_graph(
+    graph = format_graph(
         chain[0], lambda name: name, lambda name: [following[name]] if name in following else []
     )
+    return f"{relative_branch}:\n{graph}" if relative_branch else graph
 
 
 async def write_tags(git_ctx: git.Git, topics: TopicStack, forest: Forest) -> int:

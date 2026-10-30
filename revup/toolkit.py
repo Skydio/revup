@@ -83,7 +83,14 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
         topics = await get_topics(git_ctx, args.base_branch)
         forest = await optimize_stack.build_forest(git_ctx, topics, args.ignore_existing)
         for tree in forest.trees:
-            print(optimize_stack.format_tree(forest.topics(tree)), end="")
+            relative_branch = forest.relative_branches.get(tree.base)
+            print(
+                optimize_stack.format_tree(
+                    forest.topics(tree),
+                    relative_branch and git_ctx.remove_branch_prefix(relative_branch),
+                ),
+                end="",
+            )
         if args.write:
             rewritten = await optimize_stack.write_tags(git_ctx, topics, forest)
             if rewritten == 0:
