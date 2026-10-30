@@ -239,14 +239,19 @@ def format_tree(chain: list[str], relative_branch: str | None = None) -> str:
     return f"{relative_branch}:\n{graph}" if relative_branch else graph
 
 
-async def write_tags(git_ctx: git.Git, topics: TopicStack, forest: Forest) -> int:
+async def write_tags(
+    git_ctx: git.Git, topics: TopicStack, forest: Forest, force: bool = False
+) -> int:
     """
     Rewrite the stack so the first commit of each placed topic carries an Optimized-Relative
     tag naming the topic before it in its tree. No tag is written for a topic that heads a
     tree or whose Relative tag already names the same topic. Stale Optimized-Relative tags are
     removed, failed topics are left alone, and trees are reused since contents don't change.
-    Returns the number of commits whose message changed.
+    With force, existing Relative tags are stripped as well and the result is written as
+    Relative tags instead. Returns the number of commits whose message changed.
     """
+    stripped = {TAG_RELATIVE, TAG_OPTIMIZED_RELATIVE} if force else {TAG_OPTIMIZED_RELATIVE}
+    written = "Relative" if force else "Optimized-Relative"
     inferred: dict[str, str | None] = {}
     for tree in forest.trees:
         chain = forest.topics(tree)
@@ -258,12 +263,14 @@ async def write_tags(git_ctx: git.Git, topics: TopicStack, forest: Forest) -> in
         name = forest.topic_of.get(commit.commit_id)
         if name not in inferred:
             continue
-        msg = strip_tag_lines(commit.commit_msg, lambda tag, _: tag == TAG_OPTIMIZED_RELATIVE)
+        msg = strip_tag_lines(commit.commit_msg, lambda tag, _: tag in stripped)
         relative = inferred[name]
         if name not in tagged:
             tagged.add(name)
-            if relative is not None and relative not in topics.topics[name].tags[TAG_RELATIVE]:
-                msg += f"\nOptimized-Relative: {relative}"
+            if relative is not None and (
+                force or relative not in topics.topics[name].tags[TAG_RELATIVE]
+            ):
+                msg += f"\n{written}: {relative}"
         if msg != commit.commit_msg:
             new_msgs[commit.commit_id] = msg
     if not new_msgs:
@@ -276,6 +283,7 @@ async def write_tags(git_ctx: git.Git, topics: TopicStack, forest: Forest) -> in
         topics.commits[first:], topics.commits[first].parents[0]
     )
     await git_ctx.soft_reset(
-        new_head, {"GIT_REFLOG_ACTION": "revup toolkit optimize-stack --write"}
+        new_head,
+        {"GIT_REFLOG_ACTION": f"revup toolkit optimize-stack --{'force-' if force else ''}write"},
     )
     return len(new_msgs)

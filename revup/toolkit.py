@@ -91,8 +91,12 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
                 ),
                 end="",
             )
-        if args.write:
-            rewritten = await optimize_stack.write_tags(git_ctx, topics, forest)
+        if args.write and args.force_write:
+            raise RevupUsageException("--write and --force-write are mutually exclusive")
+        if args.write or args.force_write:
+            rewritten = await optimize_stack.write_tags(
+                git_ctx, topics, forest, args.force_write
+            )
             if rewritten == 0:
                 logging.info(f"\nNothing to change")
             else:
