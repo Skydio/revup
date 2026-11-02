@@ -61,7 +61,7 @@ def make_toplevel_parser() -> RevupArgParser:
     revup_parser.add_argument("--git-path", default="")
     revup_parser.add_argument("--main-branch", default="main")
     revup_parser.add_argument("--base-branch-globs", default="")
-    revup_parser.add_argument("--git-version", default="2.43.0")
+    revup_parser.add_argument("--git-version", default="2.45.0")
     for s in ShellType:
         revup_parser.add_argument(
             f"--prompt-completion-{s.value}", default="", help=argparse.SUPPRESS
