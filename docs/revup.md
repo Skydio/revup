@@ -123,6 +123,9 @@ given branch relative to its base branch, then cherry-pick it.
 **revup restack**
 : Reorder the current stack so that commits in a topic are consecutive.
 
+**revup optimize-stack**
+: Automatically arrange topics into relative chains.
+
 **revup config**
 : Edit configuration and set default values for command flags.
 

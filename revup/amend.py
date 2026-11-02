@@ -426,9 +426,7 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
                 new_commit = await replay_cherry_pick(git_ctx, commit_obj, new_commit)
     else:
         # If there's no diff (only text changed), its much faster to use the same trees
-        new_commit = stack[0].parents[0]
-        for stack_entry in stack:
-            new_commit = await git_ctx.cherry_pick_from_tree(stack_entry, new_commit)
+        new_commit = await git_ctx.reparent_commits(stack, stack[0].parents[0])
 
     mode = "--drop " if args.drop else "--insert " if args.insert else ""
     title = stack[0].commit_msg.splitlines()[0][:40]
