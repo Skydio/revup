@@ -1,4 +1,5 @@
 import argparse
+from pathlib import Path
 
 import pytest
 from git_env import (
@@ -576,6 +577,38 @@ class TestAmendConflict:
 
             with pytest.raises(RevupConflictException):
                 await amend.main(args, env.git_ctx)
+
+    @async_test
+    async def test_conflict_saves_edited_message(self):
+        async with GitTestEnvironment() as env:
+            await env.commit("root", {"root.txt": "r"})
+            await env.commit("first", {"a.txt": "line1\nline2\nline3\n"})
+            await env.commit("second", {"a.txt": "line1\nchanged_by_second\nline3\n"})
+
+            await env.stage_file("a.txt", "line1\nconflicting_change\nline3\n")
+            env.git_ctx.editor = make_editor_script(env.tmp_dir, "reworded first")
+            args = make_amend_args(ref_or_topic="HEAD~1", edit=True)
+
+            with pytest.raises(RevupConflictException):
+                await amend.main(args, env.git_ctx)
+
+            saved = Path(env.git_ctx.git_dir) / amend.EDITED_MSG_FILENAME
+            assert saved.read_text().strip() == "reworded first"
+
+    @async_test
+    async def test_conflict_with_unchanged_message_saves_nothing(self):
+        async with GitTestEnvironment() as env:
+            await env.commit("root", {"root.txt": "r"})
+            await env.commit("first", {"a.txt": "line1\nline2\nline3\n"})
+            await env.commit("second", {"a.txt": "line1\nchanged_by_second\nline3\n"})
+
+            await env.stage_file("a.txt", "line1\nconflicting_change\nline3\n")
+            args = make_amend_args(ref_or_topic="HEAD~1", edit=False)
+
+            with pytest.raises(RevupConflictException):
+                await amend.main(args, env.git_ctx)
+
+            assert not (Path(env.git_ctx.git_dir) / amend.EDITED_MSG_FILENAME).exists()
 
     @async_test
     async def test_conflict_in_non_utf8_file_raises_cleanly(self):

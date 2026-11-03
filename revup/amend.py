@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import re
 import shlex
 import subprocess
@@ -19,6 +20,9 @@ from revup.core_types import (
 )
 
 RE_TOPIC_WITH_MODIFIERS = re.compile(r"(?P<topic>[a-zA-Z\-_0-9]+)(?P<modifiers>[\^~]+[0-9]*)?")
+
+# Where an edited commit message is kept if reapplying the stack hits a conflict
+EDITED_MSG_FILENAME = "REVUP_EDITMSG"
 
 CLEANUP_SCISSOR_LINE = r"------------------------ >8 ------------------------"
 CLEANUP_SCISSOR_COMMENT = """Do not modify or remove the line above.
@@ -361,6 +365,7 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
         stack[0].committer_date = ""
         stack[0].commit_msg = ""
 
+    edited_msg: str | None = None
     if args.edit and not args.drop:
         if args.message is not None:
             new_msg = args.message.strip()
@@ -390,40 +395,51 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
         if stack[0].commit_msg == new_msg and not has_diff:
             return 0
 
+        if stack[0].commit_msg != new_msg:
+            edited_msg = new_msg
         stack[0].commit_msg = new_msg
 
     if has_diff:
-        new_commit = stack[0].parents[0]
-        if not args.drop:
-            stack[-1].tree = GitTreeHash(await git_ctx.git_stdout("write-tree"))
-        for i, commit_obj in enumerate(stack):
-            if i == 0 and args.drop:
-                # Drop the target commit
-                continue
-            if i == 0 and len(stack) > 1:
-                # Perform an amend for the first commit, unless there's only one
-                # in which case we can use the tree shortcut.
-                temp_commit = CommitHeader(stack[-1].tree, [git.HEAD_COMMIT])
-                temp_commit.title = temp_commit.commit_msg = "cached changes"
-                temp_commit.commit_id = await git_ctx.commit_tree(temp_commit)
-                # drop must be false, so this will be the result of write-tree from above
-                stack[-1].tree = temp_commit.tree
-                try:
-                    new_commit = await git_ctx.synthetic_amend(commit_obj, temp_commit)
-                except GitConflictException as exc:
-                    await git_ctx.dump_conflict(exc)
-                    raise RevupConflictException(
-                        temp_commit,
-                        commit_obj.commit_id,
-                        "You may need to `git rebase -i` to resolve these conflicts!",
-                    ) from exc
-            elif i == len(stack) - 1 and not args.drop:
-                # For the final commit (if drop isn't used) we can assume that
-                # the state is the exact same as the original cache, so we
-                # don't actually have to apply a patch.
-                new_commit = await git_ctx.cherry_pick_from_tree(commit_obj, new_commit)
-            else:
-                new_commit = await replay_cherry_pick(git_ctx, commit_obj, new_commit)
+        try:
+            new_commit = stack[0].parents[0]
+            if not args.drop:
+                stack[-1].tree = GitTreeHash(await git_ctx.git_stdout("write-tree"))
+            for i, commit_obj in enumerate(stack):
+                if i == 0 and args.drop:
+                    # Drop the target commit
+                    continue
+                if i == 0 and len(stack) > 1:
+                    # Perform an amend for the first commit, unless there's only one
+                    # in which case we can use the tree shortcut.
+                    temp_commit = CommitHeader(stack[-1].tree, [git.HEAD_COMMIT])
+                    temp_commit.title = temp_commit.commit_msg = "cached changes"
+                    temp_commit.commit_id = await git_ctx.commit_tree(temp_commit)
+                    # drop must be false, so this will be the result of write-tree from above
+                    stack[-1].tree = temp_commit.tree
+                    try:
+                        new_commit = await git_ctx.synthetic_amend(commit_obj, temp_commit)
+                    except GitConflictException as exc:
+                        await git_ctx.dump_conflict(exc)
+                        raise RevupConflictException(
+                            temp_commit,
+                            commit_obj.commit_id,
+                            "You may need to `git rebase -i` to resolve these conflicts!",
+                        ) from exc
+                elif i == len(stack) - 1 and not args.drop:
+                    # For the final commit (if drop isn't used) we can assume that
+                    # the state is the exact same as the original cache, so we
+                    # don't actually have to apply a patch.
+                    new_commit = await git_ctx.cherry_pick_from_tree(commit_obj, new_commit)
+                else:
+                    new_commit = await replay_cherry_pick(git_ctx, commit_obj, new_commit)
+        except RevupConflictException:
+            if edited_msg is not None:
+                # The editor's copy is in the scratch dir, which is deleted on exit
+                msg_path = os.path.join(git_ctx.git_dir, EDITED_MSG_FILENAME)
+                with open(msg_path, "w", encoding="utf-8") as f:
+                    f.write(edited_msg + "\n")
+                logging.warning(f"Your edited commit message was saved to {msg_path}")
+            raise
     else:
         # If there's no diff (only text changed), its much faster to use the same trees
         new_commit = stack[0].parents[0]

@@ -30,6 +30,8 @@ Currently, conflicts between the cache and target commit or between
 the new commit and later commits are only handled by printing the
 conflicting paths, nature of the conflict, and the conflict markers
 if applicable.
+If the commit message was edited, it is saved to `REVUP_EDITMSG` in
+the git directory so it isn't lost.
 
 In the future `revup amend` will provide the user a way to resolve conflicts.
 
