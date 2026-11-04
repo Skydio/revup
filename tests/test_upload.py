@@ -7,6 +7,7 @@ import pytest
 from fake_forge import FakeForge
 from git_env import GitTestEnvironment, async_test
 
+from revup import topic_stack
 from revup.core_types import RevupConflictException, RevupShellException, RevupUsageException
 from revup.forge import PrInfo
 from revup.topic_stack import (
@@ -363,6 +364,25 @@ class TestUploadAutoTopic:
             topics = await run_upload_pipeline(env, auto_topic=True)
             name = next(iter(topics.topics.keys()))
             assert name == "one_two_three_four_five"
+
+    @async_test
+    async def test_auto_topic_names_are_always_valid_refs(self):
+        async with GitTestEnvironment() as env:
+            titles = {
+                "Fix the bug.": "fix_the_bug",
+                "Fix ... the thing": "fix_the_thing",
+                'Fix (the) "widget"': "fix_the_widget",
+                "wip @{foo} ../x": "wip_foo_x",
+                "a//b/.hidden/c.lock": "a/b/hidden/c",
+                "Bump v1.2 - again": "bump_v1.2_again",
+                "修复 登录 错误": "修复_登录_错误",
+            }
+            for title, expected in titles.items():
+                name = topic_stack.auto_topic_name(title)
+                assert name == expected, title
+                await env.git_ctx.git("check-ref-format", f"refs/heads/u/revup/main/{name}")
+            with pytest.raises(RevupUsageException, match="derive a topic name"):
+                topic_stack.auto_topic_name("!!! ???")
 
     @async_test
     async def test_auto_topic_strips_brackets_and_colons(self):

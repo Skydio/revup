@@ -447,13 +447,13 @@ class TestOptimizeStackAutoTopic:
             assert await env.get_commit_hash() == head
 
     @async_test
-    async def test_auto_topic_rejects_invalid_generated_name(self):
+    async def test_auto_topic_scrubs_invalid_characters(self):
         async with GitTestEnvironment() as env:
             await setup_repo(env)
-            await env.commit("Fix (the) widget", {"a.txt": "a1"})
+            await env.commit("Fix (the) widget.", {"a.txt": "a1"})
 
-            with pytest.raises(RevupUsageException, match="Invalid characters"):
-                await run_optimize_stack(env, auto_topic=True)
+            assert await run_optimize_stack(env, auto_topic=True, write=True) == 0
+            assert await env.get_commit_message() == "Fix (the) widget.\n\nTopic: fix_the_widget"
 
     @async_test
     async def test_auto_topic_write_adds_topic_tags(self):
