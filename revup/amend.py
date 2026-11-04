@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import logging
+import os
 import re
 import shlex
 import subprocess
@@ -25,6 +27,18 @@ CLEANUP_SCISSOR_COMMENT = """Do not modify or remove the line above.
 Everything below it will be ignored."""
 CLEANUP_STRIP_COMMENT = """Please enter the commit message for your changes. Lines starting
 with '{}' will be ignored, and an empty message aborts the amend."""
+
+
+def saved_message_path(git_ctx: git.Git) -> str:
+    """
+    Where the edited commit message lives while amend runs, inside the worktree's git dir.
+    """
+    return os.path.join(git_ctx.git_dir, "COMMIT_EDITMSG")
+
+
+def discard_saved_message(git_ctx: git.Git) -> None:
+    with contextlib.suppress(FileNotFoundError):
+        os.remove(saved_message_path(git_ctx))
 
 
 async def invoke_editor_for_commit_msg(
@@ -69,11 +83,12 @@ async def invoke_editor_for_commit_msg(
 
     comments = f"\n{comment_char} ".join(comments.splitlines())
 
-    with open(git_ctx.get_scratch_dir() + "/COMMIT_EDITMSG", mode="w") as temp_file:
+    path = saved_message_path(git_ctx)
+    with open(path, mode="w") as temp_file:
         temp_file.write(f"{commit_msg}\n{comments}")
 
-    subprocess.check_call((*shlex.split(editor), temp_file.name))
-    with open(temp_file.name) as editor_file:
+    subprocess.check_call((*shlex.split(editor), path))
+    with open(path) as editor_file:
         msg = editor_file.read()
 
     if cleanup_type == "strip":
@@ -251,14 +266,10 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
     """
 
     async def get_has_unstaged() -> bool:
-        # Not converted to plumbing (diff-files/diff-index). This compares the
-        # worktree, where diff-index returns 1 on a stale mtime even with no content
-        # change, so it would report spurious unstaged changes.
-        return args.all and await git_ctx.git_return_code("diff", "--no-renames", "--quiet") != 0
+        return args.all and await git_ctx.has_unstaged_changes()
 
     has_staged, has_unstaged = await asyncio.gather(
-        git_ctx.git_return_code("diff-index", "--cached", "--no-renames", "--quiet", "HEAD"),
-        get_has_unstaged(),
+        git_ctx.has_staged_changes(), get_has_unstaged()
     )
 
     args.edit = args.edit or args.insert
@@ -385,13 +396,39 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
             )
         if len(new_msg.strip()) == 0:
             logging.info("Exited due to empty commit message.")
+            discard_saved_message(git_ctx)
             return 1
 
         if stack[0].commit_msg == new_msg and not has_diff:
+            discard_saved_message(git_ctx)
             return 0
 
         stack[0].commit_msg = new_msg
 
+    try:
+        new_commit = await rebuild_stack(git_ctx, args, stack, has_diff)
+    except RevupConflictException as exc:
+        if args.edit and not args.drop and args.message is None:
+            exc.message += f"\nYour edited commit message was kept at {saved_message_path(git_ctx)}"
+        raise
+
+    mode = "--drop " if args.drop else "--insert " if args.insert else ""
+    title = stack[0].commit_msg.splitlines()[0][:40]
+    reflog_action_str = f'revup amend {mode}{stack[0].commit_id[:8]}: "{title}"'
+    git_env = {
+        "GIT_REFLOG_ACTION": reflog_action_str,
+    }
+    await git_ctx.soft_reset(new_commit, git_env)
+    discard_saved_message(git_ctx)
+    return 0
+
+
+async def rebuild_stack(
+    git_ctx: git.Git, args: argparse.Namespace, stack: list[CommitHeader], has_diff: bool
+) -> GitCommitHash:
+    """
+    Recreate the stack with the first entry amended, inserted or dropped and return the new tip.
+    """
     if has_diff:
         new_commit = stack[0].parents[0]
         if not args.drop:
@@ -427,12 +464,4 @@ async def main(args: argparse.Namespace, git_ctx: git.Git) -> int:
     else:
         # If there's no diff (only text changed), its much faster to use the same trees
         new_commit = await git_ctx.reparent_commits(stack, stack[0].parents[0])
-
-    mode = "--drop " if args.drop else "--insert " if args.insert else ""
-    title = stack[0].commit_msg.splitlines()[0][:40]
-    reflog_action_str = f'revup amend {mode}{stack[0].commit_id[:8]}: "{title}"'
-    git_env = {
-        "GIT_REFLOG_ACTION": reflog_action_str,
-    }
-    await git_ctx.soft_reset(new_commit, git_env)
-    return 0
+    return new_commit
