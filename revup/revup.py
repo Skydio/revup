@@ -133,6 +133,7 @@ def build_parser() -> tuple[RevupArgParser, list[RevupArgParser]]:
         add_help=False,
     )
     amend_parser = subparsers.add_parser("amend", aliases=["commit"], add_help=False)
+    optimize_stack_parser = subparsers.add_parser("optimize-stack", add_help=False)
     config_parser = subparsers.add_parser(
         "config",
         add_help=False,
@@ -153,10 +154,11 @@ def build_parser() -> tuple[RevupArgParser, list[RevupArgParser]]:
         cherry_pick_parser,
         restack_parser,
         upload_parser,
+        optimize_stack_parser,
     ]
 
-    for p in [upload_parser, restack_parser, amend_parser]:
-        # Some args are used by both upload and restack
+    for p in [upload_parser, restack_parser, amend_parser, optimize_stack_parser]:
+        # Args shared by the commands that operate on the stack
         p.add_argument("--help", "-h", action=HelpAction, nargs=0)
         p.add_argument("--base-branch", "-b")
         p.add_argument("--relative-branch", "-e")
@@ -221,6 +223,28 @@ def build_parser() -> tuple[RevupArgParser, list[RevupArgParser]]:
 
     amend_parser.add_argument("--parse-topics", default=True, action="store_true")
     amend_parser.add_argument("--parse-refs", default=True, action="store_true")
+
+    optimize_stack_parser.add_argument("--auto-topic", "-a", action="store_true")
+    optimize_stack_parser.add_argument(
+        "--ignore-existing",
+        "-i",
+        action="store_true",
+        help="Ignore existing Relative: tags instead of keeping each topic somewhere after its"
+        " relative in the same tree",
+    )
+    optimize_stack_parser.add_argument(
+        "--write",
+        "-w",
+        action="store_true",
+        help="Rewrite the stack to record each inferred relative as an Optimized-Relative: tag",
+    )
+    optimize_stack_parser.add_argument(
+        "--force-write",
+        "-f",
+        action="store_true",
+        help="Rewrite the stack to replace all existing Relative: and Optimized-Relative: tags"
+        " with Relative: tags for the inferred relatives",
+    )
 
     cherry_pick_parser.add_argument("--help", "-h", action=HelpAction, nargs=0)
     cherry_pick_parser.add_argument("branch_or_pr_url", nargs=1)
@@ -362,6 +386,11 @@ async def main(revup_parser: RevupArgParser, all_parsers: list[RevupArgParser]) 
         from revup import toolkit
 
         return await toolkit.main(args=args, git_ctx=git_ctx)
+
+    if args.cmd == "optimize-stack":
+        from revup import optimize_stack
+
+        return await optimize_stack.main(args=args, git_ctx=git_ctx)
 
     if args.cmd == "cherry-pick":
         from revup import cherry_pick

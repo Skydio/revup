@@ -44,6 +44,10 @@ have at most one relative topic. Commits in this topic will be cherry-picked
 on top of the branch for the relative topic, and the pull request will
 be created targeted to the relative topic's branch.
 
+**Optimized-Relative:**
+: Written by `revup optimize-stack --write` when automating relative selection.
+Functions the same as Relative, but takes precedence when both exist.
+
 **Branches:**
 : Optionally specifies base branches for this topic. Base branches are long
 living development branches that do not change or get deleted. Several base
