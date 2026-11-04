@@ -31,6 +31,33 @@ from revup.forge import MAX_COMMENTS_TO_QUERY, Forge, PrComment, PrInfo, PrUpdat
 # https://docs.github.com/en/get-started/using-git/dealing-with-special-characters-in-branch-and-tag-names
 RE_BRANCH_ALLOWED = re.compile(r"^[\w\d_\.\/-]+$")
 
+
+def clean_topic_word(word: str) -> str:
+    """
+    Reduce a word to the characters git allows in a branch component, dropping dot and
+    slash placements it rejects.
+    """
+    word = re.sub(r"[^\w./-]", "", word.lower())
+    word = re.sub(r"\.{2,}", ".", word)
+    word = re.sub(r"/+", "/", word)
+    word = re.sub(r"(^|/)\.+", r"\1", word)
+    word = re.sub(r"\.+(/|$)", r"\1", word).strip("/")
+    while word.endswith(".lock"):
+        word = word[: -len(".lock")]
+    return word if re.search(r"\w", word) else ""
+
+
+def auto_topic_name(title: str) -> str:
+    """
+    Derive a topic name from the first five words of a title that is always a valid branch
+    component, keeping letters in any script.
+    """
+    words = [w for w in map(clean_topic_word, title.split()) if w]
+    if not words:
+        raise RevupUsageException(f"Can't derive a topic name from title '{title}'")
+    return "_".join(words[:5])
+
+
 BRANCH_FORMAT_STRATEGIES = {
     "user+branch": "{uploader}/revup/{base_branch}/{topic}",
     "user": "{uploader}/revup/{topic}",
@@ -581,9 +608,7 @@ class TopicStack:
             if not parsed_tags[TAG_TOPIC]:
                 if auto_topic:
                     parsed_tags[TAG_TOPIC].add(
-                        "_".join(
-                            trimmed_msg.split("\n", maxsplit=1)[0].lower().split()[:5]
-                        ).translate({ord(":"): None, ord("["): None, ord("]"): None})
+                        auto_topic_name(trimmed_msg.split("\n", maxsplit=1)[0])
                     )
                 else:
                     # No topic tags, not a revup commit
