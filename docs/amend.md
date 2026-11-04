@@ -31,6 +31,9 @@ the new commit and later commits are only handled by printing the
 conflicting paths, nature of the conflict, and the conflict markers
 if applicable.
 
+The commit message is written to `COMMIT_EDITMSG` in the git directory
+if amend fails.
+
 In the future `revup amend` will provide the user a way to resolve conflicts.
 
 # OPTIONS

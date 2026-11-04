@@ -318,6 +318,18 @@ class Git:
     async def git_return_code(self, *args: str, **kwargs: Any) -> int:
         return (await self.git(*args, raiseonerror=False, **kwargs))[0]
 
+    async def has_staged_changes(self) -> bool:
+        return (
+            await self.git_return_code("diff-index", "--cached", "--no-renames", "--quiet", "HEAD")
+            != 0
+        )
+
+    async def has_unstaged_changes(self) -> bool:
+        # Not converted to plumbing (diff-files/diff-index). This compares the
+        # worktree, where diff-index returns 1 on a stale mtime even with no content
+        # change, so it would report spurious unstaged changes.
+        return await self.git_return_code("diff", "--no-renames", "--quiet") != 0
+
     async def git_stdout(self, *args: str, **kwargs: Any) -> str:
         return (await self.git(*args, **kwargs))[1]
 
