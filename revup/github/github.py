@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -12,7 +13,7 @@ from revup.forge import (
     PrInfo,
     PrUpdate,
 )
-from revup.github.endpoint import MAX_RETRIES, GitHubEndpoint, is_transient_status
+from revup.github.endpoint import TRANSIENT_STATUSES, GitHubEndpoint
 from revup.github.graphql import (
     ErrorClass,
     GraphqlError,
@@ -129,6 +130,28 @@ LABEL_FRAGMENT = """
 # How many times to resend a subquery that makes no progress (lone too-big field
 # or a repeated timeout) before treating its errors as fatal.
 _MAX_STALLED_RETRIES = 2
+
+# GitHub runs the mutations of one request serially and gives up on it after a
+# limited time, so requests are sized by estimated execution time.
+REQUEST_BUDGET_SECONDS = 3.0
+REQUEST_OVERHEAD_SECONDS = 0.5
+MUTATION_COST_SECONDS = {
+    "createPullRequest": 1.0,
+    "addComment": 0.3,
+    "updateIssueComment": 0.6,
+    "updatePullRequest": 0.7,
+    "requestReviews": 0.5,
+    "addAssigneesToAssignable": 1.0,
+    "addLabelsToLabelable": 0.5,
+    "convertPullRequestToDraft": 0.5,
+    "markPullRequestReadyForReview": 0.5,
+}
+# Separate requests run in parallel on GitHub's side, so chunks are sent concurrently.
+MAX_CONCURRENT_REQUESTS = 16
+
+# A server error that takes at least this long means GitHub ran out of time executing
+# the request. One that arrives sooner failed for a reason a smaller request won't fix.
+TIMEOUT_SECONDS = 8.0
 
 # How many of a pr's newest comments to read when checking whether an add landed.
 MAX_COMMENTS_TO_CHECK = 20
@@ -380,6 +403,9 @@ class Github(Forge):
         self.endpoint = endpoint
         self.repo_info = repo_info
         self.fork_info = fork_info
+        self._request_limit: asyncio.Semaphore | None = None
+        # Per mutation name: seconds of request time attributed to it and how many ran.
+        self.observed_costs: dict[str, tuple[float, int]] = {}
 
     @property
     def repo_owner(self) -> str:
@@ -394,7 +420,25 @@ class Github(Forge):
         return self.fork_info.owner != self.repo_info.owner
 
     async def close(self) -> None:
+        for name, (seconds, count) in self.observed_costs.items():
+            logging.debug(
+                f"GitHub {name}: {seconds / count:.2f}s measured over {count} fields,"
+                f" {MUTATION_COST_SECONDS[name]:.2f}s estimated"
+            )
         await self.endpoint.close()
+
+    def _observe_costs(self, q: GraphqlQuery, elapsed: float) -> None:
+        """Attribute a completed request's time to its fields in proportion to their costs."""
+        total = q.total_cost()
+        if total <= 0:
+            return
+        elapsed = max(elapsed - REQUEST_OVERHEAD_SECONDS, 0.0)
+        for single in q.queries:
+            seconds, count = self.observed_costs.get(single.name, (0.0, 0))
+            self.observed_costs[single.name] = (
+                seconds + elapsed * single.cost / total,
+                count + 1,
+            )
 
     def _make_query_everything(
         self,
@@ -415,25 +459,22 @@ class Github(Forge):
 
         return q
 
-    async def _run_once(self, q: GraphqlQuery, attempts: int = MAX_RETRIES) -> GraphqlResponse:
+    async def _run_once(self, q: GraphqlQuery) -> GraphqlResponse | RevupRequestException:
+        """Send one request. Returns the server error if GitHub gave up on it with one,
+        in which case any of its fields may or may not have applied."""
         query_str, variables = q.build()
-        if q.replay_safe:
-            return await self.endpoint.graphql(query_str, **variables)
-
+        if self._request_limit is None:
+            self._request_limit = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
         try:
-            return await self.endpoint.graphql(query_str, max_retries=1, **variables)
+            async with self._request_limit:
+                return await self.endpoint.graphql(query_str, **variables)
         except RevupRequestException as e:
-            if attempts <= 1 or not is_transient_status(e.status):
+            if e.status not in TRANSIENT_STATUSES:
                 raise
             logging.warning(
-                f"GitHub returned {e.status}, checking which comments it added before retrying"
+                f"GitHub returned {e.status} after {e.elapsed:.1f}s without finishing the request"
             )
-
-        remaining = q.without(await self._comments_already_added(q))
-        if remaining.total_items() == 0:
-            # Every field landed before the failure.
-            return GraphqlResponse(data={})
-        return await self._run_once(remaining, attempts - 1)
+            return e
 
     async def _comments_already_added(self, q: GraphqlQuery) -> set[str]:
         """Aliases of the mutation's comment fields that must not be sent again.
@@ -459,14 +500,46 @@ class Github(Forge):
     async def _execute(self, q: GraphqlQuery) -> dict[str, Any]:
         """Run a query/mutation, salvaging partial results and re-transacting the rest.
 
-        Returns the merged `data` for every field that ultimately succeeded. Fields
-        that GitHub couldn't compute (resource limits) are re-run — split smaller if a
-        field still fails alone. Fields whose effect already exists are treated as
-        done. Any other (fatal) error is raised.
+        The fields are sent as concurrent requests sized to finish within GitHub's
+        time limit. Returns the merged `data` for every field that ultimately
+        succeeded. Fields that GitHub couldn't compute (resource limits) or never
+        got to (server error) are re-run — split smaller if they fail together.
+        Fields whose effect already exists are treated as done. Any other (fatal)
+        error is raised.
 
         Only never-computed fields are ever re-sent, so mutations with real side
         effects (created PRs, posted comments) are never re-executed.
         """
+        merged: dict[str, Any] = {}
+        fatal: list[Any] = []
+        raised: BaseException | None = None
+        for result in await asyncio.gather(
+            *(
+                self._execute_chunk(chunk)
+                for chunk in q.chunks(REQUEST_BUDGET_SECONDS - REQUEST_OVERHEAD_SECONDS)
+            ),
+            return_exceptions=True,
+        ):
+            if isinstance(result, BaseException):
+                raised = raised or result
+                continue
+            data, errors = result
+            _merge_data(merged, data)
+            fatal.extend(errors)
+        if raised is not None:
+            raise raised
+        if fatal:
+            raise RevupForgeException(fatal)
+        return {"data": merged}
+
+    async def _incomplete(self, sub: GraphqlQuery) -> GraphqlQuery:
+        """The fields of a request GitHub gave up on that still need sending."""
+        if sub.replay_safe:
+            return sub
+        logging.warning("Checking which comments GitHub added before resending")
+        return sub.without(await self._comments_already_added(sub))
+
+    async def _execute_chunk(self, q: GraphqlQuery) -> tuple[dict[str, Any], list[Any]]:
         merged: dict[str, Any] = {}
         fatal: list[Any] = []
         # Queue of (subquery, attempts_without_progress). Start with the whole thing.
@@ -476,7 +549,29 @@ class Github(Forge):
             if sub.total_items() == 0:
                 continue
             resp = await self._run_once(sub)
+            if isinstance(resp, RevupRequestException):
+                timed_out = resp.elapsed >= TIMEOUT_SECONDS
+                if not timed_out and stalls < _MAX_STALLED_RETRIES:
+                    await asyncio.sleep(2**stalls)
+                remaining = await self._incomplete(sub)
+                if timed_out and remaining.total_items() > 1:
+                    left, right = remaining.split()
+                    logging.warning(
+                        f"Splitting {remaining.total_items()} fields into"
+                        f" {left.total_items()} + {right.total_items()}"
+                    )
+                    pending.extend([(right, 0), (left, 0)])
+                elif stalls < _MAX_STALLED_RETRIES:
+                    pending.append((remaining, stalls + 1))
+                else:
+                    fatal.extend(
+                        {"message": f"Request repeatedly failed to complete: {single.alias}"}
+                        for single in remaining.queries
+                    )
+                continue
             _merge_data(merged, resp.data)
+            if not resp.errors:
+                self._observe_costs(sub, resp.elapsed)
 
             # A field with a non-null result completed (for a mutation, its side
             # effect applied); a null field did not. This is the source of truth for
@@ -524,7 +619,7 @@ class Github(Forge):
                     f"Request too large, splitting {retry.total_items()} fields into"
                     f" {left.total_items()} + {right.total_items()}"
                 )
-                pending.extend([(left, 0), (right, 0)])
+                pending.extend([(right, 0), (left, 0)])
             elif made_progress:
                 # Some fields completed; resubmit the remainder fresh.
                 pending.append((retry, 0))
@@ -544,9 +639,7 @@ class Github(Forge):
                         else {"message": f"Request repeatedly failed to complete: {alias}"}
                     )
 
-        if fatal:
-            raise RevupForgeException(fatal)
-        return {"data": merged}
+        return merged, fatal
 
     async def query_everything(
         self,
@@ -613,6 +706,8 @@ class Github(Forge):
             }},""",
                 var_types=["CreatePullRequestInput!"],
                 values=[inp],
+                cost=MUTATION_COST_SECONDS["createPullRequest"],
+                name="createPullRequest",
             )
 
         pr_results = await self._execute(q)
@@ -736,6 +831,7 @@ class Github(Forge):
             var_type: str,
             items: list[Any],
             replay_safe: bool = True,
+            sequence_key: str | None = None,
         ) -> None:
             for inp in items:
                 q.add(
@@ -750,10 +846,20 @@ class Github(Forge):
                     var_types=[var_type],
                     values=[inp],
                     replay_safe=replay_safe,
+                    cost=MUTATION_COST_SECONDS[mutation],
+                    name=mutation,
+                    sequence=inp[sequence_key] if sequence_key else "",
                 )
 
         # A resent addComment adds another identical comment; the rest are idempotent.
-        add_all("com", "addComment", "AddCommentInput!", comments, replay_safe=False)
+        add_all(
+            "com",
+            "addComment",
+            "AddCommentInput!",
+            comments,
+            replay_safe=False,
+            sequence_key="subjectId",
+        )
         add_all("pr", "updatePullRequest", "UpdatePullRequestInput!", inputs)
         add_all("rev", "requestReviews", "RequestReviewsInput!", reviewers)
         add_all("asn", "addAssigneesToAssignable", "AddAssigneesToAssignableInput!", assignees)

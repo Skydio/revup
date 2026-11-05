@@ -21,11 +21,6 @@ MAX_RETRIES = 3
 MAX_BACKOFF_SECONDS = 60.0
 
 
-def is_transient_status(status: int) -> bool:
-    """Whether an http status means the request is worth sending again."""
-    return status in TRANSIENT_STATUSES or status == SECONDARY_LIMIT_STATUS
-
-
 def _backoff_delay(headers: Any, attempt: int, base_delay: float) -> float:
     """Seconds to wait before retrying, driven by GitHub's rate-limit headers.
 
@@ -89,6 +84,8 @@ class GitHubEndpoint:
         # Rate-limit budget from the most recent response, for end-of-run reporting.
         self.last_ratelimit_remaining: str | None = None
         self.last_ratelimit_reset: str | None = None
+        # Monotonic time before which no request is sent, set by a secondary rate limit.
+        self.paused_until = 0.0
 
     async def close(self) -> None:
         if self.session:
@@ -118,7 +115,10 @@ class GitHubEndpoint:
             headers=headers,
             proxy=self.proxy,
         ) as resp:
-            logging.debug(f"Response status: {resp.status} took {time.time() - start_time}")
+            logging.debug(
+                f"Response status: {resp.status} took {time.time() - start_time:.2f}s"
+                f" for {len(kwargs)} variables"
+            )
             reset = resp.headers.get("x-ratelimit-reset")
             reset_str = (
                 datetime.datetime.fromtimestamp(int(reset)).isoformat()
@@ -138,6 +138,13 @@ class GitHubEndpoint:
                 body = None
             return resp.status, resp.headers, body
 
+    async def _wait_while_paused(self) -> None:
+        while True:
+            wait = self.paused_until - time.monotonic()
+            if wait <= 0:
+                return
+            await asyncio.sleep(wait)
+
     async def graphql(
         self,
         query: str,
@@ -146,7 +153,13 @@ class GitHubEndpoint:
         base_delay: float = 1.0,
         **kwargs: Any,
     ) -> GraphqlResponse:
-        """Execute a GraphQL request, retrying transient failures with backoff.
+        """Execute a GraphQL request, retrying transient failures.
+
+        A secondary rate limit (403) is retried after backing off as its headers
+        direct, and holds back every other request for as long. A server error
+        (5xx) is not resent, since it usually means GitHub gave up on the request
+        rather than that the client should slow down; callers get the
+        RevupRequestException on the first one.
 
         Returns a GraphqlResponse carrying partial data and per-field errors — a
         200 with field errors is NOT raised, so callers can salvage what resolved
@@ -154,7 +167,10 @@ class GitHubEndpoint:
         (200 with no data) and RevupRequestException for a non-retryable HTTP error.
         """
         for attempt in range(max_retries):
+            await self._wait_while_paused()
+            start_time = time.monotonic()
             status, headers, body = await self._post(query, kwargs)
+            elapsed = time.monotonic() - start_time
 
             if status == 200:
                 if body is None:
@@ -163,16 +179,19 @@ class GitHubEndpoint:
                 # and can't be salvaged or retried; fail loudly.
                 if body.get("data") is None and "errors" in body:
                     raise RevupForgeException(body["errors"])
-                return GraphqlResponse.parse(body)
+                resp = GraphqlResponse.parse(body)
+                resp.elapsed = elapsed
+                return resp
 
-            if not is_transient_status(status) or attempt >= max_retries - 1:
-                raise RevupRequestException(status, body if body is not None else {})
+            failure = RevupRequestException(status, body if body is not None else {}, elapsed)
+            if status != SECONDARY_LIMIT_STATUS or attempt >= max_retries - 1:
+                raise failure
 
             delay = min(_backoff_delay(headers, attempt, base_delay), MAX_BACKOFF_SECONDS)
             logging.warning(
                 f"GitHub returned {status}, retrying in {delay}s"
                 f" (attempt {attempt + 1}/{max_retries})"
             )
-            await asyncio.sleep(delay)
+            self.paused_until = max(self.paused_until, time.monotonic() + delay)
 
-        raise RevupRequestException(status, body if body is not None else {})
+        raise failure
