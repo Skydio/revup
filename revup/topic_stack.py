@@ -127,6 +127,17 @@ NONIDENTIFYING_TAGS = {
 RE_COMMIT_LABEL = re.compile(r"^(?P<label1>[a-zA-Z\-_0-9]+):.*|^\[(?P<label2>[a-zA-Z\-_0-9]+)\].*")
 
 PATCHSETS_FIRST_LINE = "| # | head | base | diff | date | summary |\r\n| - | - | - | - | - | - |"
+RE_PATCHSET_HEAD = re.compile(r"\[[0-9a-f]+\]\(/[^/)]+/[^/)]+/commit/([0-9a-f]+)\)")
+
+
+def patchsets_last_head(text: str) -> GitCommitHash | None:
+    """
+    Return the head commit recorded by the last row of a patchsets comment, if any.
+    """
+    match = RE_PATCHSET_HEAD.search(text.rsplit("\r\n", maxsplit=1)[-1])
+    return GitCommitHash(match.group(1)) if match else None
+
+
 REVIEW_GRAPH_FIRST_LINE = "Reviews in this chain:\r\n"
 # Indentation used under a last child in the review graph
 GRAPH_INDENT = "\u3000"
@@ -487,14 +498,21 @@ class TopicStack:
         self, review: Review, orig: PrComment | None
     ) -> PrComment | None:
         if (
-            review.push_status != PushStatus.PUSHED
-            or review.status == PrStatus.MERGED
+            review.status == PrStatus.MERGED
             or not self.forge
             or review.pr_info is None
             or review.pr_info.headRefOid is None
             or review.base_ref is None
         ):
             return None
+
+        # A branch that isn't being pushed still needs a row if the last upload pushed it
+        # but never got to update the comment
+        recovering = None
+        if review.push_status != PushStatus.PUSHED:
+            recovering = patchsets_last_head(orig.text) if orig else None
+            if recovering is None or recovering == review.pr_info.headRefOid:
+                return None
 
         if not orig:
             # No PR yet or no comment yet, add the initial header.
@@ -514,7 +532,19 @@ class TopicStack:
             except ValueError:
                 return None
 
-        if not review.is_pure_rebase:
+        head = review.new_commits[-1]
+        if recovering is not None:
+            diff_base = recovering
+            summary = (
+                await self.git_ctx.get_diff_summary(diff_base, head)
+                if await self.git_ctx.is_branch_or_commit(diff_base)
+                else "unknown"
+            )
+            diff = (
+                f"[diff](/{self.forge.repo_owner}/{self.forge.repo_name}/compare/"
+                f"{diff_base}..{head})"
+            )
+        elif not review.is_pure_rebase:
             if review.status == PrStatus.NEW:
                 # New PR, diff against base to show full diff
                 diff_base = review.base_ref
@@ -535,9 +565,9 @@ class TopicStack:
                 diff_base = GitCommitHash(review.pr_info.headRefOid)
             diff = (
                 f"[diff](/{self.forge.repo_owner}/{self.forge.repo_name}/compare/"
-                f"{diff_base}..{review.new_commits[-1]})"
+                f"{diff_base}..{head})"
             )
-            summary = await self.git_ctx.get_diff_summary(diff_base, review.new_commits[-1])
+            summary = await self.git_ctx.get_diff_summary(diff_base, head)
             if not summary:
                 summary = "0 files changed"
         else:
@@ -547,8 +577,8 @@ class TopicStack:
 
         d = datetime.now()
         ret += (
-            f"\r\n| {number} | [{review.new_commits[-1][:8]}]"
-            f"(/{self.forge.repo_owner}/{self.forge.repo_name}/commit/{review.new_commits[-1]}) "
+            f"\r\n| {number} | [{head[:8]}]"
+            f"(/{self.forge.repo_owner}/{self.forge.repo_name}/commit/{head}) "
             f"| [{review.base_ref[:8]}]"
             f"(/{self.forge.repo_owner}/{self.forge.repo_name}/commit/{review.base_ref}) "
             f"| {diff} | {d:%b} {d.day} {d.hour}:{d.minute:02} {d:%p} | {summary} |"
