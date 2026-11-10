@@ -98,10 +98,9 @@ async def process_stream(
 async def feed_input(stdin_writer: asyncio.StreamWriter | None, input_str: str | None) -> None:
     if stdin_writer is None:
         return
-    if not input_str:
-        return
-    stdin_writer.write(input_str.encode("utf-8"))
-    await stdin_writer.drain()
+    if input_str:
+        stdin_writer.write(input_str.encode("utf-8"))
+        await stdin_writer.drain()
     stdin_writer.close()
 
 
@@ -148,8 +147,8 @@ class Shell:
         Coroutine[Any, Any, bytes],
         Coroutine[Any, Any, int],
     ]:
-        assert not (stdin and input_str)
-        if input_str:
+        assert not (stdin is not None and input_str is not None)
+        if input_str is not None:
             stdin = subprocess.PIPE
 
         if env is not None:
