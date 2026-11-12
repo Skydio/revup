@@ -8,7 +8,12 @@ from fake_forge import FakeForge
 from git_env import GitTestEnvironment, async_test
 
 from revup import topic_stack
-from revup.core_types import RevupConflictException, RevupShellException, RevupUsageException
+from revup.core_types import (
+    RevupConflictException,
+    RevupRequestException,
+    RevupShellException,
+    RevupUsageException,
+)
 from revup.forge import PrInfo
 from revup.topic_stack import (
     PrBodySource,
@@ -1788,6 +1793,27 @@ class TestForgeUpdatePrs:
 
             body_updates = [u for u in forge.updated_prs if u.body is not None]
             assert len(body_updates) == 0
+
+    @async_test
+    async def test_failed_update_prs_logs_warning_and_still_prints_table(self, caplog, capsys):
+        class FailingUpdateForge(FakeForge):
+            async def update_pull_requests(self, prs):
+                raise RevupRequestException(502, {})
+
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            forge = FailingUpdateForge()
+            await env.commit("feat\n\nTopic: alpha", {"a.txt": "v1"})
+
+            with pytest.raises(RevupRequestException):
+                await full_upload_pipeline(env, forge)
+
+            assert any(
+                "Failed to update" in rec.message and rec.levelname == "WARNING"
+                for rec in caplog.records
+            )
+            out = capsys.readouterr().out
+            assert "Topic: alpha" in out
 
 
 class TestForgeReviewers:

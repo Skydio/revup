@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -12,7 +13,12 @@ from revup.forge import (
     PrInfo,
     PrUpdate,
 )
-from revup.github.endpoint import MAX_RETRIES, GitHubEndpoint, is_transient_status
+from revup.github.endpoint import (
+    MAX_RETRIES,
+    TRANSIENT_STATUSES,
+    GitHubEndpoint,
+    _backoff_delay,
+)
 from revup.github.graphql import (
     ErrorClass,
     GraphqlError,
@@ -132,6 +138,9 @@ _MAX_STALLED_RETRIES = 2
 
 # How many of a pr's newest comments to read when checking whether an add landed.
 MAX_COMMENTS_TO_CHECK = 20
+
+# Maximum PRs packed into one create/update mutation so each call stays within gateway timeouts.
+MAX_PRS_PER_MUTATION = 4
 
 
 def _merge_data(into: dict[str, Any], src: Any) -> None:
@@ -415,25 +424,44 @@ class Github(Forge):
 
         return q
 
-    async def _run_once(self, q: GraphqlQuery, attempts: int = MAX_RETRIES) -> GraphqlResponse:
+    async def _run_once(self, q: GraphqlQuery) -> GraphqlResponse:
         query_str, variables = q.build()
-        if q.replay_safe:
-            return await self.endpoint.graphql(query_str, **variables)
+        # `_execute` handles 5xx recovery; `endpoint.graphql` handles 403 rate-limit backoff.
+        return await self.endpoint.graphql(query_str, retry_5xx=False, **variables)
 
-        try:
-            return await self.endpoint.graphql(query_str, max_retries=1, **variables)
-        except RevupRequestException as e:
-            if attempts <= 1 or not is_transient_status(e.status):
-                raise
-            logging.warning(
-                f"GitHub returned {e.status}, checking which comments it added before retrying"
-            )
+    async def _recover_from_5xx(
+        self, sub: GraphqlQuery, status: int, attempts: int
+    ) -> list[tuple[GraphqlQuery, int, int]] | None:
+        """Subqueries to queue after an HTTP 5xx, or None when retries are exhausted."""
+        if sub.total_items() <= 1 and attempts <= 1:
+            return None
 
-        remaining = q.without(await self._comments_already_added(q))
+        remaining = sub
+        if not sub.replay_safe:
+            logging.warning(f"GitHub returned {status}, checking which comments it added")
+            remaining = sub.without(await self._comments_already_added(sub))
+
+        next_attempts = max(1, attempts - 1)
         if remaining.total_items() == 0:
-            # Every field landed before the failure.
-            return GraphqlResponse(data={})
-        return await self._run_once(remaining, attempts - 1)
+            return []
+        if sub.total_items() == 1:
+            delay = _backoff_delay({}, MAX_RETRIES - attempts, 1.0)
+            logging.warning(
+                f"GitHub returned {status}, retrying in {delay}s"
+                f" (attempt {MAX_RETRIES - attempts + 1}/{MAX_RETRIES})"
+            )
+            await asyncio.sleep(delay)
+            return [(remaining, 0, next_attempts)]
+        if remaining.total_items() == 1:
+            return [(remaining, 0, next_attempts)]
+
+        left, right = remaining.split()
+        logging.warning(
+            f"GitHub returned {status}, splitting {remaining.total_items()} fields into"
+            f" {left.total_items()} + {right.total_items()}"
+        )
+        # `_execute` pops from the end, so `left` runs before `right`.
+        return [(right, 0, next_attempts), (left, 0, next_attempts)]
 
     async def _comments_already_added(self, q: GraphqlQuery) -> set[str]:
         """Aliases of the mutation's comment fields that must not be sent again.
@@ -464,18 +492,28 @@ class Github(Forge):
         field still fails alone. Fields whose effect already exists are treated as
         done. Any other (fatal) error is raised.
 
-        Only never-computed fields are ever re-sent, so mutations with real side
-        effects (created PRs, posted comments) are never re-executed.
+        On a 200 response, only null fields are re-sent. On an HTTP 5xx, which carries
+        no field results, landed addComment fields are dropped before splitting; all
+        other mutations are idempotent or treat "already exists" as done.
         """
         merged: dict[str, Any] = {}
         fatal: list[Any] = []
-        # Queue of (subquery, attempts_without_progress). Start with the whole thing.
-        pending: list[tuple[GraphqlQuery, int]] = [(q, 0)]
+        # Queue of (subquery, stalls, attempts). Single-field 5xx retries stop at attempts == 1.
+        pending: list[tuple[GraphqlQuery, int, int]] = [(q, 0, MAX_RETRIES)]
         while pending:
-            sub, stalls = pending.pop()
+            sub, stalls, attempts = pending.pop()
             if sub.total_items() == 0:
                 continue
-            resp = await self._run_once(sub)
+            try:
+                resp = await self._run_once(sub)
+            except RevupRequestException as e:
+                if e.status not in TRANSIENT_STATUSES:
+                    raise
+                retries = await self._recover_from_5xx(sub, e.status, attempts)
+                if retries is None:
+                    raise
+                pending.extend(retries)
+                continue
             _merge_data(merged, resp.data)
 
             # A field with a non-null result completed (for a mutation, its side
@@ -524,14 +562,14 @@ class Github(Forge):
                     f"Request too large, splitting {retry.total_items()} fields into"
                     f" {left.total_items()} + {right.total_items()}"
                 )
-                pending.extend([(left, 0), (right, 0)])
+                pending.extend([(right, 0, attempts), (left, 0, attempts)])
             elif made_progress:
                 # Some fields completed; resubmit the remainder fresh.
-                pending.append((retry, 0))
+                pending.append((retry, 0, attempts))
             elif stalls < _MAX_STALLED_RETRIES:
                 # No progress (a lone too-big field, or a repeated timeout): retry a
                 # bounded number of times before giving up.
-                pending.append((retry, stalls + 1))
+                pending.append((retry, stalls + 1, attempts))
             else:
                 # Give up. Surface a fatal error for each field that never
                 # completed — synthesizing one for timeouts, which name no field —
@@ -584,44 +622,41 @@ class Github(Forge):
         )
 
     async def create_pull_requests(self, repo_id: str, prs: list[PrInfo]) -> None:
-        inputs = []
-        for pr in prs:
-            headRef = pr.headRef if not self.is_fork else f"{self.fork_info.owner}:{pr.headRef}"
-            inputs.append(
-                {
-                    "baseRefName": pr.baseRef,
-                    "body": pr.body,
-                    "clientMutationId": "revup",
-                    "headRefName": headRef,
-                    "repositoryId": repo_id,
-                    "title": pr.title,
-                    "draft": pr.is_draft,
-                }
-            )
-
-        q = GraphqlQuery(operation=GraphqlOperation.MUTATION)
-        for inp in inputs:
-            q.add(
-                prefix="pr",
-                scope="mutation",
-                field_template="""
+        for start in range(0, len(prs), MAX_PRS_PER_MUTATION):
+            chunk = prs[start : start + MAX_PRS_PER_MUTATION]
+            q = GraphqlQuery(operation=GraphqlOperation.MUTATION)
+            for pr in chunk:
+                headRef = pr.headRef if not self.is_fork else f"{self.fork_info.owner}:{pr.headRef}"
+                q.add(
+                    prefix="pr",
+                    scope="mutation",
+                    field_template="""
             {}: createPullRequest(input: {}) {{
                 pullRequest {{
                     id
                     url
                 }}
             }},""",
-                var_types=["CreatePullRequestInput!"],
-                values=[inp],
-            )
+                    var_types=["CreatePullRequestInput!"],
+                    values=[
+                        {
+                            "baseRefName": pr.baseRef,
+                            "body": pr.body,
+                            "clientMutationId": "revup",
+                            "headRefName": headRef,
+                            "repositoryId": repo_id,
+                            "title": pr.title,
+                            "draft": pr.is_draft,
+                        }
+                    ],
+                )
 
-        pr_results = await self._execute(q)
-        raw = q.extract(pr_results, "pr")
-        for i, pr in enumerate(prs):
-            result_node = raw[i]["pullRequest"] if raw[i] is not None else None
-            if result_node is not None:
-                pr.id = result_node["id"]
-                pr.url = result_node["url"]
+            pr_results = await self._execute(q)
+            for pr, raw in zip(chunk, q.extract(pr_results, "pr")):
+                result_node = raw["pullRequest"] if raw is not None else None
+                if result_node is not None:
+                    pr.id = result_node["id"]
+                    pr.url = result_node["url"]
 
         # A create that came back "already exists" (from a prior partial run) leaves
         # id/url unset. The PR does exist, so look it up by head ref — otherwise a
@@ -645,7 +680,9 @@ class Github(Forge):
                 pr.url = nodes[0]["url"]
 
     async def update_pull_requests(self, prs: list[PrUpdate]) -> None:
-        await self._execute(self._build_update_mutation(prs))
+        for start in range(0, len(prs), MAX_PRS_PER_MUTATION):
+            chunk = prs[start : start + MAX_PRS_PER_MUTATION]
+            await self._execute(self._build_update_mutation(chunk))
 
     def _build_update_mutation(self, prs: list[PrUpdate]) -> GraphqlQuery:
         inputs = []
