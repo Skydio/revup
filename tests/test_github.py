@@ -12,7 +12,7 @@ import pytest
 from revup.core_types import RevupForgeException, RevupRequestException
 from revup.forge import ForgeRepoInfo, PrComment, PrInfo, PrUpdate
 from revup.github.endpoint import MAX_RETRIES, GitHubEndpoint, _backoff_delay
-from revup.github.github import _MAX_STALLED_RETRIES, Github, _merge_data
+from revup.github.github import _MAX_STALLED_RETRIES, MAX_PRS_PER_MUTATION, Github, _merge_data
 from revup.github.graphql import GraphqlResponse
 
 
@@ -570,6 +570,53 @@ class TestCreatePullRequests:
         assert prs[1].id == "PR_2"
         assert prs[2].id == "PR_3"
 
+    def test_large_stack_chunks_creates_and_recovers_missing_ids(self):
+        """Creates run in chunks of MAX_PRS_PER_MUTATION and look up PRs that already exist."""
+        endpoint = AsyncMock(spec=GitHubEndpoint)
+        chunk_sizes: list[int] = []
+
+        async def mock_graphql(query, **kwargs):
+            if "createPullRequest" in query:
+                pr_vars = sorted(
+                    (k for k in kwargs if k.startswith("pr")),
+                    key=lambda k: int(k[2:]),
+                )
+                chunk_sizes.append(len(pr_vars))
+                data = {}
+                errors = []
+                for k in pr_vars:
+                    head = kwargs[k]["headRefName"]
+                    alias = f"pr_out{k[2:]}"
+                    if head == "f5":
+                        data[alias] = {"pullRequest": None}
+                        errors.append(
+                            {
+                                "type": "UNPROCESSABLE",
+                                "path": [alias],
+                                "message": "A pull request already exists",
+                            }
+                        )
+                    else:
+                        data[alias] = {"pullRequest": {"id": f"ID_{head}", "url": f"url/{head}"}}
+                return gql(data, errors=errors)
+            return gql(
+                {"repository": {"id": "R_1", "pr_out0": make_pr_node("ID_f5", url="url/f5")}}
+            )
+
+        endpoint.graphql = mock_graphql
+        gh = make_github(endpoint)
+
+        total = 2 * MAX_PRS_PER_MUTATION + 1
+        prs = [
+            PrInfo(baseRef="main", headRef=f"f{i}", headRefOid=None, body="b", title=f"t{i}")
+            for i in range(total)
+        ]
+        asyncio.run(gh.create_pull_requests("R_1", prs))
+
+        assert chunk_sizes == [MAX_PRS_PER_MUTATION, MAX_PRS_PER_MUTATION, 1]
+        assert [pr.id for pr in prs] == [f"ID_f{i}" for i in range(total)]
+        assert [pr.url for pr in prs] == [f"url/f{i}" for i in range(total)]
+
 
 class TestUpdatePullRequests:
     def test_builds_all_mutation_types(self):
@@ -671,8 +718,8 @@ class TestUpdatePullRequests:
 
         assert sum("addComment" in q for q, _ in ep._post.sent) == MAX_RETRIES
 
-    def test_transient_status_retries_mutation_without_added_comments(self):
-        """Every mutation field other than addComment is idempotent, so it still retries."""
+    def test_single_field_idempotent_mutation_retries_with_backoff_on_502(self):
+        """A single-field replay-safe mutation cannot split, so it sleeps and retries."""
         ep = make_endpoint()
         ep._post = scripted_post(
             (502, {}, None),
@@ -681,12 +728,187 @@ class TestUpdatePullRequests:
         gh = make_github(ep)
 
         with patch("asyncio.sleep", new=AsyncMock()) as sleep:
+            asyncio.run(gh.update_pull_requests([PrUpdate(id="PR_1", title="t")]))
+        sleep.assert_awaited_once()
+
+    def test_502_splits_multi_field_idempotent_mutation_without_comment_lookup(self):
+        """A 502 on a multi-field idempotent mutation splits in half without FindComments."""
+        sent: list[tuple[str, dict[str, Any]]] = []
+
+        async def _post(query, kwargs):
+            sent.append((query, dict(kwargs)))
+            if len(kwargs) > 2:
+                return 502, {}, None
+            return _mutation_ok(kwargs)
+
+        ep = make_endpoint()
+        ep._post = _post
+        gh = make_github(ep)
+
+        with patch("asyncio.sleep", new=AsyncMock()) as sleep:
             asyncio.run(
                 gh.update_pull_requests(
-                    [PrUpdate(id="PR_1", title="t", comments=[PrComment("edit me", "C_1")])]
+                    [
+                        PrUpdate(id="PR_1", title="t1", comments=[PrComment("e1", "C_1")]),
+                        PrUpdate(id="PR_2", title="t2", comments=[PrComment("e2", "C_2")]),
+                    ]
                 )
             )
-        sleep.assert_awaited_once()
+
+        sleep.assert_not_awaited()
+        assert not any("node(" in q for q, _ in sent)
+        assert [len(kwargs) for _, kwargs in sent] == [4, 2, 2]
+        applied = {k: v for _, kwargs in sent[1:] for k, v in kwargs.items()}
+        assert applied["pr0"]["title"] == "t1"
+        assert applied["pr1"]["title"] == "t2"
+        assert applied["edit_com0"]["id"] == "C_1"
+        assert applied["edit_com1"]["id"] == "C_2"
+
+    def test_502_drops_landed_add_comment_and_splits_remaining_fields(self):
+        """On 502, landed addComment fields are dropped and the remaining fields split."""
+        sent: list[tuple[str, dict[str, Any]]] = []
+
+        async def _post(query, kwargs):
+            sent.append((query, dict(kwargs)))
+            if "node(" in query:
+                return _comments_found(kwargs, {"PR_1": ["landed"], "PR_2": []})
+            if len(kwargs) > 3:
+                return 502, {}, None
+            return _mutation_ok(kwargs)
+
+        ep = make_endpoint()
+        ep._post = _post
+        gh = make_github(ep)
+
+        asyncio.run(
+            gh.update_pull_requests(
+                [
+                    PrUpdate(id="PR_1", title="t1", comments=[PrComment("landed")]),
+                    PrUpdate(id="PR_2", title="t2", comments=[PrComment("missing")]),
+                    PrUpdate(id="PR_3", title="t3", comments=[PrComment("edit", "C_3")]),
+                ]
+            )
+        )
+
+        mutation_batches = [kwargs for q, kwargs in sent if "node(" not in q]
+        assert len(mutation_batches[0]) == 6
+        # After dropping PR_1's landed addComment, the 5 remaining fields split into 3 + 2.
+        assert [len(b) for b in mutation_batches[1:]] == [3, 2]
+        retried_vars = {k: v for b in mutation_batches[1:] for k, v in b.items()}
+        assert "com0" not in retried_vars
+        assert retried_vars["com1"]["body"] == "missing"
+        assert retried_vars["pr0"]["title"] == "t1"
+        assert retried_vars["pr1"]["title"] == "t2"
+        assert retried_vars["pr2"]["title"] == "t3"
+        assert retried_vars["edit_com0"]["id"] == "C_3"
+
+    def test_403_rate_limit_on_multi_field_mutation_sleeps_and_resends_all_fields(self):
+        """A secondary rate limit (403) sleeps for Retry-After and resends every field."""
+        sent: list[dict[str, Any]] = []
+
+        async def _post(query, kwargs):
+            sent.append(dict(kwargs))
+            if len(sent) == 1:
+                return 403, {"retry-after": "3"}, None
+            return _mutation_ok(kwargs)
+
+        ep = make_endpoint()
+        ep._post = _post
+        gh = make_github(ep)
+
+        with patch("asyncio.sleep", new=AsyncMock()) as sleep:
+            asyncio.run(
+                gh.update_pull_requests(
+                    [PrUpdate(id="PR_1", title="a"), PrUpdate(id="PR_2", title="b")]
+                )
+            )
+
+        sleep.assert_awaited_once_with(3.0)
+        assert [len(b) for b in sent] == [2, 2]
+
+    def test_403_after_502_splits_sleeps_and_succeeds(self):
+        """After two 502 splits, a single-field leaf still gets full 403 rate-limit backoff."""
+        sent: list[dict[str, Any]] = []
+        saw_leaf_403 = False
+
+        async def _post(query, kwargs):
+            nonlocal saw_leaf_403
+            sent.append(dict(kwargs))
+            if len(kwargs) > 1:
+                return 502, {}, None
+            if not saw_leaf_403:
+                saw_leaf_403 = True
+                return 403, {"retry-after": "4"}, None
+            return _mutation_ok(kwargs)
+
+        ep = make_endpoint()
+        ep._post = _post
+        gh = make_github(ep)
+
+        updates = [PrUpdate(id=f"PR_{i}", title=f"t{i}") for i in range(4)]
+        with patch("asyncio.sleep", new=AsyncMock()) as sleep:
+            asyncio.run(gh.update_pull_requests(updates))
+
+        sleep.assert_awaited_once_with(4.0)
+        assert [len(b) for b in sent] == [4, 2, 1, 1, 1, 2, 1, 1]
+
+    def test_403_on_add_comment_mutation_sleeps_without_comment_lookup(self):
+        """A 403 rate limit on an addComment mutation sleeps and resends without FindComments."""
+        sent: list[tuple[str, dict[str, Any]]] = []
+
+        async def _post(query, kwargs):
+            sent.append((query, dict(kwargs)))
+            if len(sent) == 1:
+                return 403, {"retry-after": "5"}, None
+            return _mutation_ok(kwargs)
+
+        ep = make_endpoint()
+        ep._post = _post
+        gh = make_github(ep)
+
+        with patch("asyncio.sleep", new=AsyncMock()) as sleep:
+            asyncio.run(
+                gh.update_pull_requests([PrUpdate(id="PR_1", title="t", comments=[PrComment("c")])])
+            )
+
+        sleep.assert_awaited_once_with(5.0)
+        assert not any("node(" in q for q, _ in sent)
+        assert [len(b) for _, b in sent] == [2, 2]
+
+    def test_502_splits_recursively_down_to_single_fields(self):
+        """Repeated 502s keep halving until single-field mutations succeed."""
+        sent: list[dict[str, Any]] = []
+
+        async def _post(query, kwargs):
+            sent.append(dict(kwargs))
+            if len(kwargs) > 1:
+                return 502, {}, None
+            return _mutation_ok(kwargs)
+
+        ep = make_endpoint()
+        ep._post = _post
+        gh = make_github(ep)
+
+        updates = [PrUpdate(id=f"PR_{i}", title=f"t{i}") for i in range(4)]
+        asyncio.run(gh.update_pull_requests(updates))
+
+        assert [len(b) for b in sent] == [4, 2, 1, 1, 2, 1, 1]
+        solo_titles = [next(iter(b.values()))["title"] for b in sent if len(b) == 1]
+        assert solo_titles == ["t0", "t1", "t2", "t3"]
+
+    def test_502_with_all_comments_landed_sends_nothing_more(self):
+        """A multi-comment mutation whose comments all landed before 502 sends nothing more."""
+        ep = make_endpoint()
+        ep._post = commenting_post({"PR_1": ["c1", "c2"]})
+        gh = make_github(ep)
+
+        q = gh._build_update_mutation(
+            [PrUpdate(id="PR_1", comments=[PrComment("c1"), PrComment("c2")])]
+        )
+        res = asyncio.run(gh._execute(q.subset({"com_out0", "com_out1"})))
+
+        assert res == {"data": {}}
+        assert sum("addComment" in query for query, _ in ep._post.sent) == 1
 
     def test_transient_status_with_only_added_comments_sends_nothing_more(self):
         """A mutation whose every comment already landed sends nothing more."""
@@ -695,9 +917,9 @@ class TestUpdatePullRequests:
         gh = make_github(ep)
 
         q = gh._build_update_mutation([PrUpdate(id="PR_1", comments=[PrComment("hi")])])
-        resp = asyncio.run(gh._run_once(q.subset({"com_out0"})))
+        res = asyncio.run(gh._execute(q.subset({"com_out0"})))
 
-        assert resp.data == {}
+        assert res == {"data": {}}
         assert sum("addComment" in query for query, _ in ep._post.sent) == 1
 
     def test_mutation_timeout_resubmits_only_unapplied(self):
@@ -875,6 +1097,29 @@ class TestUpdatePullRequests:
         assert kwargs["rev0"]["pullRequestId"] == "PR_1"
         assert kwargs["asn0"]["assignableId"] == "PR_2"
 
+    def test_large_stack_chunks_updates_sequentially(self):
+        """update_pull_requests sends at most MAX_PRS_PER_MUTATION PRs per mutation."""
+        endpoint = AsyncMock(spec=GitHubEndpoint)
+        batches: list[list[str]] = []
+
+        async def mock_graphql(query, **kwargs):
+            pr_ids = [
+                kwargs[k]["pullRequestId"]
+                for k in sorted((k for k in kwargs if k.startswith("pr")), key=lambda k: int(k[2:]))
+            ]
+            batches.append(pr_ids)
+            return gql_raw({"data": {}})
+
+        endpoint.graphql = mock_graphql
+        gh = make_github(endpoint)
+
+        total = 2 * MAX_PRS_PER_MUTATION + 1
+        updates = [PrUpdate(id=f"PR_{i}", title=f"t{i}") for i in range(total)]
+        asyncio.run(gh.update_pull_requests(updates))
+
+        assert [len(b) for b in batches] == [MAX_PRS_PER_MUTATION, MAX_PRS_PER_MUTATION, 1]
+        assert [pid for b in batches for pid in b] == [f"PR_{i}" for i in range(total)]
+
 
 class TestMergeData:
     def test_merges_nested_repository_and_top_level(self):
@@ -1027,6 +1272,27 @@ def _alias_of(var_name):
     return f"{prefix}_out{var_name[len(prefix) :]}"
 
 
+def _mutation_ok(kwargs):
+    """A 200 response that applies every mutation field in `kwargs`."""
+    return 200, {}, {"data": {_alias_of(name): {"clientMutationId": "revup"} for name in kwargs}}
+
+
+def _comments_found(kwargs, comments_by_pr):
+    """A 200 FindComments response answered from `comments_by_pr`."""
+    return (
+        200,
+        {},
+        {
+            "data": {
+                _alias_of(name): {
+                    "comments": {"nodes": [{"body": b} for b in comments_by_pr[pr_id]]}
+                }
+                for name, pr_id in kwargs.items()
+            }
+        },
+    )
+
+
 def commenting_post(comments_by_pr, fail_forever=False):
     """An async _post replacement that 502s a mutation adding comments, answers the
     resulting lookup from `comments_by_pr`, and succeeds otherwise.
@@ -1038,26 +1304,11 @@ def commenting_post(comments_by_pr, fail_forever=False):
     async def _post(query, kwargs):
         sent.append((query, kwargs))
         if "node(" in query:
-            return (
-                200,
-                {},
-                {
-                    "data": {
-                        _alias_of(name): {
-                            "comments": {"nodes": [{"body": b} for b in comments_by_pr[pr_id]]}
-                        }
-                        for name, pr_id in kwargs.items()
-                    }
-                },
-            )
+            return _comments_found(kwargs, comments_by_pr)
         first_add = not any("addComment" in q for q, _ in sent[:-1])
         if "addComment" in query and (fail_forever or first_add):
             return 502, {}, None
-        return (
-            200,
-            {},
-            {"data": {_alias_of(name): {"clientMutationId": "revup"} for name in kwargs}},
-        )
+        return _mutation_ok(kwargs)
 
     _post.sent = sent
     return _post
@@ -1129,6 +1380,25 @@ class TestEndpointGraphqlPolicy:
             with pytest.raises(RevupRequestException) as exc:
                 asyncio.run(ep.graphql("query", max_retries=2))
         assert exc.value.status == 503
+
+    def test_retry_5xx_false_raises_immediately_on_502(self):
+        ep = make_endpoint()
+        ep._post = scripted_post((502, {}, None))
+
+        with patch("asyncio.sleep", new=AsyncMock()) as sleep:
+            with pytest.raises(RevupRequestException) as exc:
+                asyncio.run(ep.graphql("query", retry_5xx=False))
+        assert exc.value.status == 502
+        sleep.assert_not_awaited()
+
+    def test_retry_5xx_false_still_retries_403(self):
+        ep = make_endpoint()
+        ep._post = scripted_post((403, {}, None), (200, {}, {"data": {"ok": 1}}))
+
+        with patch("asyncio.sleep", new=AsyncMock()) as sleep:
+            resp = asyncio.run(ep.graphql("query", retry_5xx=False))
+        assert resp.data == {"ok": 1}
+        sleep.assert_awaited_once()
 
 
 class TestEndpointBackoffDelay:

@@ -161,18 +161,25 @@ async def run(
         topics.print(not args.verbose)
         return
 
+    prs_updated = False
     try:
         with get_console().status(f"Updating {forge.name} PRs…"):
             await topics.create_prs()
             if args.review_graph:
                 topics.populate_review_graph()
             await topics.update_prs()
+        prs_updated = True
 
         if not skip_push and topics.use_reordering_workaround:
             topics.use_reordering_workaround = False
             with get_console().status("Pushing again to work around reordering issues…"):
                 await topics.push_git_refs(git_ctx.author, create_local_branches=False)
     finally:
+        if not prs_updated:
+            logging.warning(
+                f"Failed to update {forge.name} PRs. The PR table below may show updates that"
+                " did not apply. Run `revup upload` again to retry."
+            )
         topics.print(not args.verbose)
 
     yield UploadPhase.PRS_UPDATED, topics

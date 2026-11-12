@@ -21,11 +21,6 @@ MAX_RETRIES = 3
 MAX_BACKOFF_SECONDS = 60.0
 
 
-def is_transient_status(status: int) -> bool:
-    """Whether an http status means the request is worth sending again."""
-    return status in TRANSIENT_STATUSES or status == SECONDARY_LIMIT_STATUS
-
-
 def _backoff_delay(headers: Any, attempt: int, base_delay: float) -> float:
     """Seconds to wait before retrying, driven by GitHub's rate-limit headers.
 
@@ -143,6 +138,7 @@ class GitHubEndpoint:
         query: str,
         *,
         max_retries: int = MAX_RETRIES,
+        retry_5xx: bool = True,
         base_delay: float = 1.0,
         **kwargs: Any,
     ) -> GraphqlResponse:
@@ -152,6 +148,9 @@ class GitHubEndpoint:
         200 with field errors is NOT raised, so callers can salvage what resolved
         and re-transact the rest. Raises RevupForgeException for a request error
         (200 with no data) and RevupRequestException for a non-retryable HTTP error.
+
+        With retry_5xx=False, HTTP 5xx raises immediately so the caller can split
+        the request, while HTTP 403 rate limits still retry with backoff.
         """
         for attempt in range(max_retries):
             status, headers, body = await self._post(query, kwargs)
@@ -165,7 +164,10 @@ class GitHubEndpoint:
                     raise RevupForgeException(body["errors"])
                 return GraphqlResponse.parse(body)
 
-            if not is_transient_status(status) or attempt >= max_retries - 1:
+            retryable = (
+                retry_5xx and status in TRANSIENT_STATUSES
+            ) or status == SECONDARY_LIMIT_STATUS
+            if not retryable or attempt >= max_retries - 1:
                 raise RevupRequestException(status, body if body is not None else {})
 
             delay = min(_backoff_delay(headers, attempt, base_delay), MAX_BACKOFF_SECONDS)
