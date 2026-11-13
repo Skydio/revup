@@ -118,7 +118,10 @@ class GitHubEndpoint:
             headers=headers,
             proxy=self.proxy,
         ) as resp:
-            logging.debug(f"Response status: {resp.status} took {time.time() - start_time}")
+            logging.debug(
+                f"Response status: {resp.status} took {time.time() - start_time:.2f}s"
+                f" for {len(kwargs)} variables"
+            )
             reset = resp.headers.get("x-ratelimit-reset")
             reset_str = (
                 datetime.datetime.fromtimestamp(int(reset)).isoformat()
@@ -144,9 +147,16 @@ class GitHubEndpoint:
         *,
         max_retries: int = MAX_RETRIES,
         base_delay: float = 1.0,
+        retry_server_errors: bool = True,
         **kwargs: Any,
     ) -> GraphqlResponse:
-        """Execute a GraphQL request, retrying transient failures with backoff.
+        """Execute a GraphQL request, retrying transient failures.
+
+        A secondary rate limit (403) is retried after backing off as its headers
+        direct. A server error (5xx) is resent right away, since it usually means
+        GitHub gave up on the request rather than that the client should slow down;
+        callers that would rather shrink the request pass retry_server_errors=False
+        and get the RevupRequestException on the first one.
 
         Returns a GraphqlResponse carrying partial data and per-field errors — a
         200 with field errors is NOT raised, so callers can salvage what resolved
@@ -167,6 +177,13 @@ class GitHubEndpoint:
 
             if not is_transient_status(status) or attempt >= max_retries - 1:
                 raise RevupRequestException(status, body if body is not None else {})
+            if status in TRANSIENT_STATUSES:
+                if not retry_server_errors:
+                    raise RevupRequestException(status, body if body is not None else {})
+                logging.warning(
+                    f"GitHub returned {status}, retrying (attempt {attempt + 1}/{max_retries})"
+                )
+                continue
 
             delay = min(_backoff_delay(headers, attempt, base_delay), MAX_BACKOFF_SECONDS)
             logging.warning(

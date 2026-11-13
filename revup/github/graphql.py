@@ -107,6 +107,8 @@ class SingleQuery:
     index: int
     # False if re-sending this field would duplicate an effect it already applied.
     replay_safe: bool = True
+    # Estimated seconds GitHub spends executing this field, for sizing requests.
+    cost: float = 0.0
 
     @property
     def alias(self) -> str:
@@ -164,6 +166,7 @@ class GraphqlQuery:
         values: list[Any],
         fragment: str = "",
         replay_safe: bool = True,
+        cost: float = 0.0,
     ) -> None:
         """Add a field. Its alias index is fixed here so results stay addressable
         by prefix even after the query is split and its results merged."""
@@ -180,6 +183,7 @@ class GraphqlQuery:
                 fragment=fragment,
                 index=idx,
                 replay_safe=replay_safe,
+                cost=cost,
             )
         )
 
@@ -214,6 +218,30 @@ class GraphqlQuery:
 
     def total_items(self) -> int:
         return len(self.queries)
+
+    def total_cost(self) -> float:
+        return sum(q.cost for q in self.queries)
+
+    def chunks(self, budget: float) -> list[GraphqlQuery]:
+        """Split the fields into requests whose estimated cost each fits the budget.
+
+        A field costing more than the budget gets a request of its own. Fields
+        without a cost estimate are never split up here.
+        """
+        if budget <= 0 or self.total_cost() == 0:
+            return [self]
+        ret: list[GraphqlQuery] = []
+        current: list[SingleQuery] = []
+        current_cost = 0.0
+        for q in self.queries:
+            if current and current_cost + q.cost > budget:
+                ret.append(self._with_fields(current))
+                current, current_cost = [], 0.0
+            current.append(q)
+            current_cost += q.cost
+        if current:
+            ret.append(self._with_fields(current))
+        return ret
 
     def build(self) -> tuple[str, dict[str, Any]]:
         all_decls: list[str] = []
