@@ -9,11 +9,14 @@ from git_env import GitTestEnvironment, async_test
 
 from revup import topic_stack
 from revup.core_types import RevupConflictException, RevupShellException, RevupUsageException
-from revup.forge import PrInfo
+from revup.forge import PrComment, PrInfo
 from revup.topic_stack import (
+    PATCHSETS_FIRST_LINE,
     PrBodySource,
     PrStatus,
     PushStatus,
+    Review,
+    Topic,
     TopicStack,
     TrimTags,
     format_remote_branch,
@@ -2552,3 +2555,46 @@ class TestForgePreUpload:
 
             assert topics.topics["alpha"].reviews["origin/main"].push_status == PushStatus.NOCHANGE
             assert not (env.tmp_dir / "hook_ran.txt").exists()
+
+
+class TestPatchsetsRecovery:
+    async def make_review(self, env):
+        root = await env.get_commit_hash()
+        old = await env.commit("one\n\nTopic: one", {"a.txt": "a1"})
+        new = await env.commit("one more\n\nTopic: one", {"a.txt": "a2"})
+        topics = TopicStack(env.git_ctx, "main", "")
+        topics.forge = FakeForge()
+        review = Review(Topic("one"))
+        review.pr_info = PrInfo(baseRef="main", headRef="h", headRefOid=new, body="", title="t")
+        review.push_status = PushStatus.NOCHANGE
+        review.base_ref = root
+        review.new_commits = [new]
+        table = (
+            PATCHSETS_FIRST_LINE
+            + f"\r\n| 0 | [{old[:8]}](/o/r/commit/{old}) | [{root[:8]}](/o/r/commit/{root})"
+            " | [diff](/o/r/compare/x..y) | Nov 1 1:00 PM | 1 file changed |"
+        )
+        return topics, review, old, new, PrComment(table, "C_1")
+
+    @async_test
+    async def test_row_added_when_table_lags_pushed_head(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            topics, review, old, new, orig = await self.make_review(env)
+
+            comment = await topics.create_patchsets_comment(review, orig)
+
+            assert comment is not None and comment.id == "C_1"
+            last = comment.text.split("\r\n")[-1]
+            assert last.startswith(f"| 1 | [{new[:8]}]")
+            assert f"compare/{old}..{new}" in last
+            assert "1 file changed" in last
+
+    @async_test
+    async def test_no_row_when_table_matches_pushed_head(self):
+        async with GitTestEnvironment() as env:
+            await setup_repo(env)
+            topics, review, old, _, orig = await self.make_review(env)
+            review.pr_info.headRefOid = old
+
+            assert await topics.create_patchsets_comment(review, orig) is None
