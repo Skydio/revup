@@ -5,8 +5,8 @@ revup amend - Modify commits in the current stack.
 # SYNOPSIS
 
 `revup [--verbose] [--keep-temp]`
-: `amend [--help] [--edit] [--message=<msg>] [--insert] [--drop] [--all]`
-`[--base-branch=<br>] [--relative-branch=<br>]`
+: `amend [--help] [--edit] [--message=<msg>] [--insert] [--drop]`
+`[--last-touched] [--all] [--base-branch=<br>] [--relative-branch=<br>]`
 `[--no-parse-topics] [--no-parse-refs] [<ref|topic>]`
 
 # DESCRIPTION
@@ -65,6 +65,12 @@ requires a commit message.
 **--drop, -d**
 : Instead of amending the given commit, drop it and leave any changes
 it made in cache. Implies --no-edit and cannot be used with --insert.
+
+**--last-touched, -l**
+: Instead of amending a single commit, amend each staged file into the
+most recent commit in the stack that touched it. Files no stack commit
+touched stay staged. Cannot be combined with a ref or topic, --insert,
+--drop or --no-parse-topics.
 
 **--all, -a**
 : Tell revup to automatically stage files that have been modified and
