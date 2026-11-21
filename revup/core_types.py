@@ -86,7 +86,9 @@ class RevupForgeException(Exception):
 
 
 class RevupRequestException(Exception):
-    def __init__(self, status: int, response: dict):
+    def __init__(self, status: int, response: dict, elapsed: float = 0.0):
         super().__init__()
         self.status = status
         self.response = response
+        # Seconds the forge took to answer the failed request.
+        self.elapsed = elapsed

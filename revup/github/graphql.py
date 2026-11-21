@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -79,6 +80,8 @@ class GraphqlResponse:
 
     data: Any
     errors: list[GraphqlError] = field(default_factory=list)
+    # Seconds the request took.
+    elapsed: float = 0.0
 
     @classmethod
     def parse(cls, raw: Any) -> GraphqlResponse:
@@ -107,10 +110,20 @@ class SingleQuery:
     index: int
     # False if re-sending this field would duplicate an effect it already applied.
     replay_safe: bool = True
+    # Estimated seconds GitHub spends executing this field, for sizing requests.
+    cost: float = 0.0
+    # Consecutive fields sharing a non-empty sequence are sent in one request.
+    sequence: str = ""
 
     @property
     def alias(self) -> str:
         return f"{self.prefix}_out{self.index}"
+
+    @property
+    def name(self) -> str:
+        """The GraphQL field this aliases."""
+        match = re.search(r"\{\}:\s*(\w+)", self.field_template)
+        return match.group(1) if match else self.prefix
 
     def var_name(self, var_idx: int) -> str:
         if len(self.var_types) == 1:
@@ -164,6 +177,8 @@ class GraphqlQuery:
         values: list[Any],
         fragment: str = "",
         replay_safe: bool = True,
+        cost: float = 0.0,
+        sequence: str = "",
     ) -> None:
         """Add a field. Its alias index is fixed here so results stay addressable
         by prefix even after the query is split and its results merged."""
@@ -180,6 +195,8 @@ class GraphqlQuery:
                 fragment=fragment,
                 index=idx,
                 replay_safe=replay_safe,
+                cost=cost,
+                sequence=sequence,
             )
         )
 
@@ -214,6 +231,31 @@ class GraphqlQuery:
 
     def total_items(self) -> int:
         return len(self.queries)
+
+    def total_cost(self) -> float:
+        return sum(q.cost for q in self.queries)
+
+    def chunks(self, budget: float) -> list[GraphqlQuery]:
+        """Split the fields into requests whose estimated cost each fits the budget.
+
+        A field costing more than the budget gets a request of its own. Fields
+        without a cost estimate are never split up here.
+        """
+        if budget <= 0 or self.total_cost() == 0:
+            return [self]
+        ret: list[GraphqlQuery] = []
+        current: list[SingleQuery] = []
+        current_cost = 0.0
+        for q in self.queries:
+            in_sequence = q.sequence != "" and current and q.sequence == current[-1].sequence
+            if current and current_cost + q.cost > budget and not in_sequence:
+                ret.append(self._with_fields(current))
+                current, current_cost = [], 0.0
+            current.append(q)
+            current_cost += q.cost
+        if current:
+            ret.append(self._with_fields(current))
+        return ret
 
     def build(self) -> tuple[str, dict[str, Any]]:
         all_decls: list[str] = []

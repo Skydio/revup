@@ -11,8 +11,15 @@ import pytest
 
 from revup.core_types import RevupForgeException, RevupRequestException
 from revup.forge import ForgeRepoInfo, PrComment, PrInfo, PrUpdate
-from revup.github.endpoint import MAX_RETRIES, GitHubEndpoint, _backoff_delay
-from revup.github.github import _MAX_STALLED_RETRIES, Github, _merge_data
+from revup.github.endpoint import GitHubEndpoint, _backoff_delay
+from revup.github.github import (
+    _MAX_STALLED_RETRIES,
+    COMMENT_COST,
+    REQUEST_BUDGET_SECONDS,
+    TIMEOUT_SECONDS,
+    Github,
+    _merge_data,
+)
 from revup.github.graphql import GraphqlResponse
 
 
@@ -573,7 +580,7 @@ class TestCreatePullRequests:
 
 class TestUpdatePullRequests:
     def test_builds_all_mutation_types(self):
-        """Labels, reviewers, assignees, draft conversion, comments all go in one mutation."""
+        """Labels, reviewers, assignees, draft conversion and comments are all sent."""
         endpoint = AsyncMock(spec=GitHubEndpoint)
         endpoint.graphql = AsyncMock(return_value=gql_raw({"data": {}}))
         gh = make_github(endpoint)
@@ -594,7 +601,7 @@ class TestUpdatePullRequests:
 
         asyncio.run(gh.update_pull_requests(updates))
 
-        _, kwargs = endpoint.graphql.call_args
+        kwargs = {k: v for _, sent in endpoint.graphql.call_args_list for k, v in sent.items()}
         assert kwargs["pr0"]["title"] == "new title"
         assert kwargs["pr0"]["body"] == "new body"
         assert kwargs["label0"]["labelIds"] == ["L_1"]
@@ -625,7 +632,7 @@ class TestUpdatePullRequests:
         ep._post = commenting_post({"PR_1": ["hi"]})
         gh = make_github(ep)
 
-        asyncio.run(gh.update_pull_requests([PrUpdate(id="PR_1", comments=[PrComment("hi")])]))
+        run_clocked(gh.update_pull_requests([PrUpdate(id="PR_1", comments=[PrComment("hi")])]))
 
         sent = ep._post.sent
         assert sum("addComment" in q for q, _ in sent) == 1
@@ -638,7 +645,7 @@ class TestUpdatePullRequests:
         ep._post = commenting_post({"PR_1": []})
         gh = make_github(ep)
 
-        asyncio.run(gh.update_pull_requests([PrUpdate(id="PR_1", comments=[PrComment("hi")])]))
+        run_clocked(gh.update_pull_requests([PrUpdate(id="PR_1", comments=[PrComment("hi")])]))
 
         resent = [kwargs for q, kwargs in ep._post.sent if "addComment" in q]
         assert len(resent) == 2
@@ -650,7 +657,7 @@ class TestUpdatePullRequests:
         ep._post = commenting_post({"PR_1": ["landed"]})
         gh = make_github(ep)
 
-        asyncio.run(
+        run_clocked(
             gh.update_pull_requests(
                 [PrUpdate(id="PR_1", comments=[PrComment("landed"), PrComment("lost")])]
             )
@@ -666,27 +673,123 @@ class TestUpdatePullRequests:
         ep._post = commenting_post({"PR_1": []}, fail_forever=True)
         gh = make_github(ep)
 
-        with pytest.raises(RevupRequestException):
-            asyncio.run(gh.update_pull_requests([PrUpdate(id="PR_1", comments=[PrComment("hi")])]))
+        with pytest.raises(RevupForgeException):
+            run_clocked(gh.update_pull_requests([PrUpdate(id="PR_1", comments=[PrComment("hi")])]))
 
-        assert sum("addComment" in q for q, _ in ep._post.sent) == MAX_RETRIES
+        # Sent once with the rest of the mutation, once alone after the split, then retried.
+        assert sum("addComment" in q for q, _ in ep._post.sent) == 2 + _MAX_STALLED_RETRIES
 
-    def test_transient_status_retries_mutation_without_added_comments(self):
-        """Every mutation field other than addComment is idempotent, so it still retries."""
+    def test_timeout_splits_idempotent_mutation_without_waiting(self):
+        """Fields other than addComment are idempotent, so a request GitHub ran out of
+        time on is split in half and both halves are resent right away."""
         ep = make_endpoint()
+        done = {
+            "pr_out0": {"clientMutationId": "revup"},
+            "edit_com_out0": {"clientMutationId": "x"},
+        }
         ep._post = scripted_post(
-            (502, {}, None),
-            (200, {}, {"data": {"pr_out0": {"clientMutationId": "revup"}}}),
+            (502, {}, None), (200, {}, {"data": done}), (200, {}, {"data": done})
         )
         gh = make_github(ep)
 
-        with patch("asyncio.sleep", new=AsyncMock()) as sleep:
-            asyncio.run(
-                gh.update_pull_requests(
-                    [PrUpdate(id="PR_1", title="t", comments=[PrComment("edit me", "C_1")])]
-                )
-            )
-        sleep.assert_awaited_once()
+        clock = FakeClock(TIMEOUT_SECONDS)
+        run_clocked(
+            gh.update_pull_requests(
+                [PrUpdate(id="PR_1", title="t", comments=[PrComment("edit me", "C_1")])]
+            ),
+            clock,
+        )
+        assert not clock.slept
+        assert gh.request_budget < REQUEST_BUDGET_SECONDS
+
+    def test_quick_server_error_resends_whole_request_after_waiting(self):
+        """A server error that arrives quickly isn't about the request's size, so the
+        same fields are resent together after a wait and the budget is kept."""
+        ep = make_endpoint()
+        done = {
+            "pr_out0": {"clientMutationId": "revup"},
+            "edit_com_out0": {"clientMutationId": "x"},
+        }
+        sent = []
+
+        async def _post(query, kwargs):
+            sent.append(kwargs)
+            return (502, {}, None) if len(sent) == 1 else (200, {}, {"data": done})
+
+        ep._post = _post
+        gh = make_github(ep)
+
+        clock = FakeClock()
+        run_clocked(
+            gh.update_pull_requests(
+                [PrUpdate(id="PR_1", title="t", comments=[PrComment("edit me", "C_1")])]
+            ),
+            clock,
+        )
+        assert len(sent) == 2
+        assert sent[0].keys() == sent[1].keys()
+        assert clock.slept
+        assert gh.request_budget == REQUEST_BUDGET_SECONDS
+
+    def test_comment_added_after_the_timeout_is_not_resent(self):
+        """A comment GitHub adds after giving up on the request is waited for."""
+        ep = make_endpoint()
+        on_pr: list[str] = []
+        ep._post = commenting_post({"PR_1": on_pr})
+        gh = make_github(ep)
+
+        clock = FakeClock(TIMEOUT_SECONDS)
+        settle = clock.sleep
+
+        async def sleep(seconds):
+            on_pr.append("hi")
+            await settle(seconds)
+
+        clock.sleep = sleep
+        run_clocked(
+            gh.update_pull_requests([PrUpdate(id="PR_1", comments=[PrComment("hi")])]), clock
+        )
+
+        assert sum("addComment" in q for q, _ in ep._post.sent) == 1
+
+    def test_comments_of_one_pr_share_a_request(self):
+        """A pr's new comments are never split across concurrent requests."""
+        endpoint = AsyncMock(spec=GitHubEndpoint)
+        endpoint.graphql = AsyncMock(return_value=gql_raw({"data": {}}))
+        gh = make_github(endpoint)
+
+        updates = [
+            PrUpdate(id=f"PR_{i}", comments=[PrComment("graph"), PrComment("patchsets")])
+            for i in range(5)
+        ]
+        asyncio.run(gh.update_pull_requests(updates))
+
+        for _, kwargs in endpoint.graphql.call_args_list:
+            subjects = [v["subjectId"] for k, v in kwargs.items() if k.startswith("com")]
+            assert all(subjects.count(s) == 2 for s in subjects)
+
+    def test_failed_request_lets_the_others_finish(self):
+        """An error raised by one request is held until its sibling requests complete."""
+        endpoint = AsyncMock(spec=GitHubEndpoint)
+        finished = []
+
+        async def graphql(query, **kwargs):
+            if "edit_com0" in kwargs:
+                raise RevupRequestException(401, {})
+            await asyncio.sleep(0)
+            finished.append(kwargs)
+            return gql_raw({"data": {}})
+
+        endpoint.graphql = graphql
+        gh = make_github(endpoint)
+
+        updates = [
+            PrUpdate(id=f"PR_{i}", comments=[PrComment("edit", f"C_{i}")]) for i in range(10)
+        ]
+        with pytest.raises(RevupRequestException):
+            asyncio.run(gh.update_pull_requests(updates))
+
+        assert sum(k.startswith("edit_com") for kwargs in finished for k in kwargs) == 9
 
     def test_transient_status_with_only_added_comments_sends_nothing_more(self):
         """A mutation whose every comment already landed sends nothing more."""
@@ -695,10 +798,29 @@ class TestUpdatePullRequests:
         gh = make_github(ep)
 
         q = gh._build_update_mutation([PrUpdate(id="PR_1", comments=[PrComment("hi")])])
-        resp = asyncio.run(gh._run_once(q.subset({"com_out0"})))
+        result = run_clocked(gh._execute(q.subset({"com_out0"})))
 
-        assert resp.data == {}
+        assert result == {"data": {}}
         assert sum("addComment" in query for query, _ in ep._post.sent) == 1
+
+    def test_large_mutation_is_sent_as_several_requests(self):
+        """Mutations are grouped into requests whose estimated cost fits the budget."""
+        endpoint = AsyncMock(spec=GitHubEndpoint)
+        endpoint.graphql = AsyncMock(return_value=gql_raw({"data": {}}))
+        gh = make_github(endpoint)
+
+        updates = [
+            PrUpdate(id=f"PR_{i}", comments=[PrComment("edit", f"C_{i}")]) for i in range(10)
+        ]
+        asyncio.run(gh.update_pull_requests(updates))
+
+        per_request = REQUEST_BUDGET_SECONDS // COMMENT_COST
+        sent = [kwargs for _, kwargs in endpoint.graphql.call_args_list]
+        assert len(sent) > 1
+        assert all(sum(k.startswith("edit_com") for k in kwargs) <= per_request for kwargs in sent)
+        assert sorted(k for kwargs in sent for k in kwargs if k.startswith("edit_com")) == sorted(
+            f"edit_com{i}" for i in range(10)
+        )
 
     def test_mutation_timeout_resubmits_only_unapplied(self):
         """On a whole-request timeout, fields that applied (non-null data) are kept and
@@ -1011,6 +1133,34 @@ def make_endpoint() -> GitHubEndpoint:
     return GitHubEndpoint(oauth_token="tok", github_url="github.com")
 
 
+class FakeClock:
+    """Stands in for the endpoint's clock and asyncio.sleep. Every request appears to
+    take `step` seconds, and sleeping advances the clock without waiting."""
+
+    def __init__(self, step: float = 0.0):
+        self.now = 0.0
+        self.step = step
+        self.slept: list[float] = []
+
+    def monotonic(self) -> float:
+        self.now += self.step
+        return self.now
+
+    def time(self) -> float:
+        return self.now
+
+    async def sleep(self, seconds: float) -> None:
+        self.slept.append(seconds)
+        self.now += seconds
+
+
+def run_clocked(coro, clock: FakeClock | None = None):
+    """Run `coro` on a fake clock, by default one where every request times out."""
+    clock = clock or FakeClock(TIMEOUT_SECONDS)
+    with patch("revup.github.endpoint.time", clock), patch("asyncio.sleep", clock.sleep):
+        return asyncio.run(coro)
+
+
 def scripted_post(*responses):
     """An async _post replacement yielding (status, headers, body) tuples in order."""
     it = iter(responses)
@@ -1094,22 +1244,52 @@ class TestEndpointGraphqlPolicy:
         with pytest.raises(RevupRequestException):
             asyncio.run(ep.graphql("query"))
 
-    def test_transient_status_then_success_retries(self):
+    def test_server_error_then_success_retries_without_waiting(self):
         ep = make_endpoint()
         ep._post = scripted_post((502, {}, None), (200, {}, {"data": {"ok": 1}}))
 
         with patch("asyncio.sleep", new=AsyncMock()) as sleep:
             resp = asyncio.run(ep.graphql("query"))
         assert resp.data == {"ok": 1}
-        sleep.assert_awaited_once()
+        sleep.assert_not_awaited()
+
+    def test_server_error_not_retried_when_caller_opts_out(self):
+        ep = make_endpoint()
+        ep._post = scripted_post((502, {}, None), (200, {}, {"data": {"ok": 1}}))
+
+        with pytest.raises(RevupRequestException) as exc:
+            asyncio.run(ep.graphql("query", retry_server_errors=False))
+        assert exc.value.status == 502
 
     def test_secondary_limit_403_is_retried(self):
         ep = make_endpoint()
         ep._post = scripted_post((403, {}, None), (200, {}, {"data": {"ok": 1}}))
 
-        with patch("asyncio.sleep", new=AsyncMock()):
-            resp = asyncio.run(ep.graphql("query"))
+        resp = run_clocked(ep.graphql("query"), FakeClock())
         assert resp.data == {"ok": 1}
+
+    def test_secondary_limit_holds_back_other_requests(self):
+        ep = make_endpoint()
+        ep._post = scripted_post(
+            (403, {"retry-after": "30"}, None),
+            (200, {}, {"data": {"ok": 1}}),
+            (200, {}, {"data": {"ok": 2}}),
+        )
+        clock = FakeClock()
+
+        async def limited_then_other():
+            limited = asyncio.ensure_future(ep.graphql("query"))
+            await asyncio.sleep(0)
+            other = await ep.graphql("query")
+            return (await limited).data, other.data, clock.now
+
+        async def post(query, kwargs, _post=ep._post):
+            await asyncio.sleep(0)
+            return await _post(query, kwargs)
+
+        ep._post = post
+        _, _, finished_at = run_clocked(limited_then_other(), clock)
+        assert finished_at >= 30
 
     def test_non_retryable_status_raises_immediately(self):
         ep = make_endpoint()
